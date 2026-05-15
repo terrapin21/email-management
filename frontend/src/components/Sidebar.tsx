@@ -84,8 +84,8 @@ export default function Sidebar() {
       <div className="px-4 py-3 border-t border-gray-700">
         <div className="flex items-center justify-between mb-2">
           <div className="text-xs text-gray-400 truncate">{user?.full_name || user?.username}</div>
-          <button onClick={() => { setForm({ username: user?.username || '', password: '', confirm: '' }); setShowProfile(true) }} className="text-gray-500 hover:text-white">
-            <Pencil size={12} />
+          <button onClick={() => { setForm({ username: user?.username || '', password: '', confirm: '' }); setShowProfile(true) }} className="text-gray-300 hover:text-white ml-2 flex-shrink-0">
+            <Pencil size={14} />
           </button>
         </div>
         <button
