@@ -1,0 +1,3 @@
+﻿backend/.env
+db_backup.sql
+db_backup.dump
