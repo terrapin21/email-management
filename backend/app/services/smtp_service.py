@@ -8,6 +8,7 @@ from email.header import Header
 from email import encoders
 from app import models
 from app.config import settings
+from app.url_cache import get_site_url
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def forward_email(
         return False, "SMTPホストが設定されていません"
 
     extracted = fields or {}
-    detail_url = f"{settings.SITE_URL}/emails/{email.id}"
+    detail_url = f"{get_site_url(settings.SITE_URL)}/emails/{email.id}"
 
     try:
         subject = build_subject(rule.subject_template, email, extracted)

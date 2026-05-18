@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import engine, SessionLocal
@@ -9,6 +9,7 @@ from app.auth import hash_password
 from app.config import settings
 from app.api import auth, users, accounts, labels, forwarding, emails, csv_api, documents, reply, archives
 from app.tasks.worker import start_scheduler, stop_scheduler
+from app.url_cache import set_site_url
 
 logging.basicConfig(level=logging.INFO)
 
@@ -65,6 +66,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def capture_site_url(request: Request, call_next):
+    """リクエストヘッダーからサイトのベースURLを検出してキャッシュする。
+    Cloudflare Tunnel 経由の場合は X-Forwarded-Proto / Host ヘッダーを参照する。"""
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host", "")
+    )
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    if host and "localhost" not in host and "127.0.0.1" not in host:
+        set_site_url(f"{proto}://{host}")
+    return await call_next(request)
 
 app.include_router(auth.router)
 app.include_router(users.router)
