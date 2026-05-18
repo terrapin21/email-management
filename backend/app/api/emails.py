@@ -65,6 +65,7 @@ def list_emails(
     forwarded_ids: set = set()
     registration_map: dict = {}  # email_id -> "registered"
     reflection_map: dict = {}    # email_id -> "reflected" | "not_reflected" | None
+    has_attachment_ids: set = set()
 
     if email_ids:
         forwarded_ids = {
@@ -98,6 +99,13 @@ def list_emails(
             if eid not in registration_map:
                 registration_map[eid] = "not_registered"
 
+        has_attachment_ids = {
+            row[0] for row in
+            db.query(models.EmailAttachment.email_id)
+            .filter(models.EmailAttachment.email_id.in_(email_ids))
+            .distinct().all()
+        }
+
     items = []
     for e in emails:
         labels = [el.label for el in e.email_labels if el.label and el.label.is_active]
@@ -111,6 +119,7 @@ def list_emails(
 
         items.append(EmailListItem(
             is_forwarded=e.id in forwarded_ids,
+            has_attachments=e.id in has_attachment_ids,
             id=e.id,
             account_id=e.account_id,
             subject=e.subject,

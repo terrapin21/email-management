@@ -19,7 +19,14 @@ SAME_SENDER_WINDOW_HOURS = 48
 
 def is_archive(filename: str) -> bool:
     lower = filename.lower()
-    return lower.endswith('.zip') or lower.endswith('.7z')
+    return lower.endswith('.zip') or lower.endswith('.7z') or lower.endswith('.zi_')
+
+
+def _normalize_archive_filename(filename: str) -> str:
+    """メール送信時に拡張子を変形されたファイル（.zi_ など）を正規の拡張子に戻す。"""
+    if filename.lower().endswith('.zi_'):
+        return filename[:-4] + '.zip'
+    return filename
 
 
 def is_password_protected(data: bytes, filename: str) -> bool:
@@ -248,7 +255,9 @@ def _process_single_attachment(db: Session, email_obj: models.Email, att_data: d
     if not is_archive(filename):
         return
     data = att_data.get('data', b'')
-    if not data or not is_password_protected(data, filename):
+    # .zi_ などの変形拡張子を正規化して処理（バイナリは同一）
+    normalized_filename = _normalize_archive_filename(filename)
+    if not data or not is_password_protected(data, normalized_filename):
         return
 
     att_record = db.query(models.EmailAttachment).filter(
@@ -286,12 +295,12 @@ def _process_single_attachment(db: Session, email_obj: models.Email, att_data: d
     if pw_email:
         password = extract_password_from_text(pw_email.body_text or '')
         if password:
-            _do_extract(db, archive, data, filename, password, pw_email)
+            _do_extract(db, archive, data, normalized_filename, password, pw_email)
 
     db.commit()
     logger.info(
         f"暗号化アーカイブ検出: email_id={email_obj.id}, "
-        f"attachment={filename}, status={archive.status.value}"
+        f"attachment={filename}({normalized_filename}), status={archive.status.value}"
     )
 
 
@@ -405,7 +414,7 @@ def try_extract_pending_archives_for_sender(db: Session, password_email: models.
             logger.warning(f"添付バイナリ取得失敗のためスキップ: archive_id={archive.id}, att_id={att.id}")
             continue
 
-        _do_extract(db, archive, data, att.filename, password, password_email)
+        _do_extract(db, archive, data, _normalize_archive_filename(att.filename), password, password_email)
         db.commit()
         logger.info(f"パスワードメールで解凍完了: archive_id={archive.id}")
 

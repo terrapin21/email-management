@@ -8,7 +8,7 @@ import StatusBadge from '../components/StatusBadge'
 import LabelBadge from '../components/LabelBadge'
 import { format } from 'date-fns'
 import { ja } from 'date-fns/locale'
-import { Search, ChevronLeft, ChevronRight, Bot, AlertCircle, Forward, CheckCircle2, Circle } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, Bot, AlertCircle, Forward, CheckCircle2, Circle, Paperclip } from 'lucide-react'
 
 const STATUS_OPTIONS = [
   { value: '', label: 'すべて' },
@@ -203,7 +203,12 @@ export default function EmailList() {
                       </button>
                     </td>
                     <td className="px-4 py-3">
-                      {email.ai_priority === 'high' && <AlertCircle size={14} className="text-red-500" />}
+                      <div className="flex items-center gap-1">
+                        {email.ai_priority === 'high' && <AlertCircle size={14} className="text-red-500" />}
+                        {email.has_attachments && (
+                          <Paperclip size={13} className="text-gray-400" title="添付ファイルあり" />
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 max-w-xs">
                       <Link to={`/emails/${email.id}`} state={{ from: location.pathname + location.search }} className="hover:text-indigo-600 transition-colors">

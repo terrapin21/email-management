@@ -304,6 +304,7 @@ class EmailListItem(BaseModel):
     status: Optional[EmailStatusEnum] = EmailStatusEnum.unread
     confirmed_by_name: Optional[str] = None
     is_forwarded: bool = False
+    has_attachments: bool = False
     registration_status: Optional[str] = None   # "registered" | "not_registered" | None
     reflection_status: Optional[str] = None     # "reflected" | "not_reflected" | None
 

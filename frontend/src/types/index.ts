@@ -107,6 +107,7 @@ export interface EmailListItem {
   status: EmailStatus
   confirmed_by_name?: string
   is_forwarded: boolean
+  has_attachments: boolean
   registration_status?: 'registered' | 'not_registered' | null
   reflection_status?: 'reflected' | 'not_reflected' | null
 }
