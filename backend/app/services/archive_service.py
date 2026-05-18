@@ -312,7 +312,9 @@ def process_existing_archives_for_account(db: Session, account: models.EmailAcco
         models.Email, models.EmailAttachment.email_id == models.Email.id
     ).filter(
         models.Email.account_id == account.id,
-        models.EmailAttachment.filename.ilike('%.zip') | models.EmailAttachment.filename.ilike('%.7z'),
+        models.EmailAttachment.filename.ilike('%.zip')
+        | models.EmailAttachment.filename.ilike('%.7z')
+        | models.EmailAttachment.filename.ilike('%.zi_'),
     ).all()
 
     processed = 0
@@ -345,7 +347,8 @@ def process_existing_archives_for_account(db: Session, account: models.EmailAcco
             RAW_STORAGE.mkdir(parents=True, exist_ok=True)
             raw_path.write_bytes(data)
 
-        if not is_password_protected(data, att.filename):
+        normalized = _normalize_archive_filename(att.filename)
+        if not is_password_protected(data, normalized):
             continue
 
         email_obj = db.query(models.Email).get(att.email_id)
@@ -369,7 +372,7 @@ def process_existing_archives_for_account(db: Session, account: models.EmailAcco
         if pw_email:
             password = extract_password_from_text(pw_email.body_text or '')
             if password:
-                _do_extract(db, archive, data, att.filename, password, pw_email)
+                _do_extract(db, archive, data, normalized, password, pw_email)
 
         db.commit()
         processed += 1
