@@ -699,9 +699,9 @@ def _email_sender_type(email: models.Email) -> str | None:
 
 
 def _is_site_id_field(field_name: str) -> bool:
-    """施主No系フィールド名かどうか判定。"""
+    """コード系フィールド名かどうか判定。"""
     fn = field_name.lower()
-    keywords = ["施主", "工事番号", "現場コード", "現場no", "発注no", "案件no", "物件コード",
+    keywords = ["コード", "施主", "工事番号", "現場コード", "現場no", "発注no", "案件no", "物件コード",
                 "site id", "site no", "site code", "genba no"]
     return any(k in fn for k in keywords)
 
