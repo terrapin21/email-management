@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 RAW_STORAGE = Path("/app/attachments/raw")
 EXTRACTED_STORAGE = Path("/app/attachments/extracted")
+_ATT_CACHE = Path("/app/attachments/cache")
 SAME_SENDER_WINDOW_HOURS = 48
 
 
@@ -137,16 +138,37 @@ def find_password_email(db: Session, archive_email: models.Email) -> Optional[mo
 
 
 def _extract_zip(data: bytes, password: str, output_dir: Path) -> list:
+    # 日本語ZIPツール（Lhaplus等）はCP932でパスワードを扱うためUTF-8/CP932の両方を試みる
+    pwd_candidates: list[bytes] = []
+    for enc in ('utf-8', 'cp932'):
+        try:
+            b = password.encode(enc)
+            if b not in pwd_candidates:
+                pwd_candidates.append(b)
+        except UnicodeEncodeError:
+            pass
+
+    last_err: Exception = RuntimeError("パスワードが正しくありません")
+    for pwd_bytes in pwd_candidates:
+        try:
+            return _do_extract_zip(data, pwd_bytes, output_dir)
+        except RuntimeError as e:
+            last_err = e
+    raise last_err
+
+
+def _do_extract_zip(data: bytes, pwd_bytes: bytes, output_dir: Path) -> list:
     extracted = []
-    pwd_bytes = password.encode('utf-8')
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
             fname = info.filename
+            # ファイル名エンコーディングをCP437→UTF-8/CP932/Shift_JISの順で試みる
             for enc in ['utf-8', 'cp932', 'shift_jis']:
                 try:
-                    fname = info.filename.encode('cp437').decode(enc)
+                    decoded = info.filename.encode('cp437').decode(enc)
+                    fname = decoded
                     break
                 except Exception:
                     pass
@@ -215,54 +237,62 @@ def _do_extract(db: Session, archive: models.EncryptedArchive, data: bytes,
 def process_encrypted_attachments(db: Session, email_obj: models.Email, raw_attachments: list):
     for att_data in raw_attachments:
         filename = att_data.get('filename', '')
-        if not is_archive(filename):
-            continue
-        data = att_data.get('data', b'')
-        if not data or not is_password_protected(data, filename):
-            continue
-
-        att_record = db.query(models.EmailAttachment).filter(
-            models.EmailAttachment.email_id == email_obj.id,
-            models.EmailAttachment.filename == filename,
-        ).first()
-        if not att_record:
-            continue
-
-        existing = db.query(models.EncryptedArchive).filter(
-            models.EncryptedArchive.attachment_id == att_record.id
-        ).first()
-        if existing:
-            continue
-
-        # 生データをディスクに保存（後でパスワードメールが届いたときに使用）
-        RAW_STORAGE.mkdir(parents=True, exist_ok=True)
-        raw_path = RAW_STORAGE / f"{att_record.id}.bin"
-        raw_path.write_bytes(data)
-
-        archive = models.EncryptedArchive(
-            email_id=email_obj.id,
-            attachment_id=att_record.id,
-            status=models.ArchiveStatusEnum.pending,
-        )
-        db.add(archive)
         try:
-            db.flush()
-        except IntegrityError:
+            _process_single_attachment(db, email_obj, att_data, filename)
+        except Exception as e:
             db.rollback()
-            logger.info(f"重複スキップ: attachment_id={att_record.id} は既に処理済み")
-            continue
+            logger.error(f"暗号化アーカイブ処理エラー (email_id={email_obj.id}, file={filename}): {e}")
 
-        pw_email = find_password_email(db, email_obj)
-        if pw_email:
-            password = extract_password_from_text(pw_email.body_text or '')
-            if password:
-                _do_extract(db, archive, data, filename, password, pw_email)
 
-        db.commit()
-        logger.info(
-            f"暗号化アーカイブ検出: email_id={email_obj.id}, "
-            f"attachment={filename}, status={archive.status.value}"
-        )
+def _process_single_attachment(db: Session, email_obj: models.Email, att_data: dict, filename: str):
+    if not is_archive(filename):
+        return
+    data = att_data.get('data', b'')
+    if not data or not is_password_protected(data, filename):
+        return
+
+    att_record = db.query(models.EmailAttachment).filter(
+        models.EmailAttachment.email_id == email_obj.id,
+        models.EmailAttachment.filename == filename,
+    ).first()
+    if not att_record:
+        return
+
+    existing = db.query(models.EncryptedArchive).filter(
+        models.EncryptedArchive.attachment_id == att_record.id
+    ).first()
+    if existing:
+        return
+
+    # 生データをディスクに保存（後でパスワードメールが届いたときに使用）
+    RAW_STORAGE.mkdir(parents=True, exist_ok=True)
+    raw_path = RAW_STORAGE / f"{att_record.id}.bin"
+    raw_path.write_bytes(data)
+
+    archive = models.EncryptedArchive(
+        email_id=email_obj.id,
+        attachment_id=att_record.id,
+        status=models.ArchiveStatusEnum.pending,
+    )
+    db.add(archive)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        logger.info(f"重複スキップ: attachment_id={att_record.id} は既に処理済み")
+        return
+
+    pw_email = find_password_email(db, email_obj)
+    if pw_email:
+        password = extract_password_from_text(pw_email.body_text or '')
+        if password:
+            _do_extract(db, archive, data, filename, password, pw_email)
+
+    db.commit()
+    logger.info(
+        f"暗号化アーカイブ検出: email_id={email_obj.id}, "
+        f"attachment={filename}, status={archive.status.value}"
+    )
 
 
 def process_existing_archives_for_account(db: Session, account: models.EmailAccount):
@@ -370,22 +400,45 @@ def try_extract_pending_archives_for_sender(db: Session, password_email: models.
         if not att:
             continue
 
-        raw_path = RAW_STORAGE / f"{att.id}.bin"
-        if raw_path.exists():
-            data = raw_path.read_bytes()
-        else:
-            # IMAPから再取得
-            email_obj = db.query(models.Email).get(archive.email_id)
-            account = db.query(models.EmailAccount).get(email_obj.account_id) if email_obj else None
-            if not email_obj or not account:
-                continue
-            from app.services.imap_service import fetch_attachments_for_message
-            att_list = fetch_attachments_for_message(account, email_obj.message_id)
-            att_data = next((a for a in att_list if a.get('filename') == att.filename), None)
-            if not att_data:
-                continue
-            data = att_data.get('data', b'')
+        data = _load_archive_data(db, archive, att)
+        if not data:
+            logger.warning(f"添付バイナリ取得失敗のためスキップ: archive_id={archive.id}, att_id={att.id}")
+            continue
 
         _do_extract(db, archive, data, att.filename, password, password_email)
         db.commit()
         logger.info(f"パスワードメールで解凍完了: archive_id={archive.id}")
+
+
+def _load_archive_data(db: Session, archive: models.EncryptedArchive, att: models.EmailAttachment) -> bytes:
+    """アーカイブのバイナリを RAW_STORAGE → ATT_CACHE → IMAP の順で取得する。"""
+    raw_path = RAW_STORAGE / f"{att.id}.bin"
+    if raw_path.exists():
+        return raw_path.read_bytes()
+
+    # 新PC移行後など RAW_STORAGE が空の場合は ATT_CACHE を確認
+    cache_path = _ATT_CACHE / f"{att.id}.bin"
+    if cache_path.exists():
+        data = cache_path.read_bytes()
+        # 次回以降のために RAW_STORAGE にも保存
+        RAW_STORAGE.mkdir(parents=True, exist_ok=True)
+        raw_path.write_bytes(data)
+        return data
+
+    # 最終手段: IMAP から再取得
+    email_obj = db.query(models.Email).get(archive.email_id)
+    account = db.query(models.EmailAccount).get(email_obj.account_id) if email_obj else None
+    if not email_obj or not account:
+        return b''
+    try:
+        from app.services.imap_service import fetch_attachments_for_message
+        att_list = fetch_attachments_for_message(account, email_obj.message_id)
+        att_item = next((a for a in att_list if a.get('filename') == att.filename), None)
+        data = att_item.get('data', b'') if att_item else b''
+        if data:
+            RAW_STORAGE.mkdir(parents=True, exist_ok=True)
+            raw_path.write_bytes(data)
+        return data
+    except Exception as e:
+        logger.warning(f"IMAP再取得失敗 att_id={att.id}: {e}")
+        return b''

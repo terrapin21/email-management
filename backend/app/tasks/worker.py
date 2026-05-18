@@ -52,11 +52,19 @@ def run_email_poll():
 
             # フェーズ2: 暗号化アーカイブの検出・登録（全メールがDB登録済みの状態で実行）
             for email_obj, raw_attachments in saved_batch:
-                archive_service.process_encrypted_attachments(db, email_obj, raw_attachments)
+                try:
+                    archive_service.process_encrypted_attachments(db, email_obj, raw_attachments)
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"フェーズ2エラー (email_id={email_obj.id}): {e}")
 
             # フェーズ3: パスワードメールで待機中アーカイブを解凍
             for email_obj, _ in saved_batch:
-                archive_service.try_extract_pending_archives_for_sender(db, email_obj)
+                try:
+                    archive_service.try_extract_pending_archives_for_sender(db, email_obj)
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"フェーズ3エラー (email_id={email_obj.id}): {e}")
     except Exception as e:
         logger.error(f"ポーリングエラー: {e}")
     finally:
