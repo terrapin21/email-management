@@ -206,7 +206,7 @@ export default function EmailList() {
                       <div className="flex items-center gap-1">
                         {email.ai_priority === 'high' && <AlertCircle size={14} className="text-red-500" />}
                         {email.has_attachments && (
-                          <Paperclip size={13} className="text-gray-400" title="添付ファイルあり" />
+                          <Paperclip size={13} className="text-gray-400" />
                         )}
                       </div>
                     </td>
