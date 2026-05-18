@@ -94,7 +94,7 @@ export default function CsvManagement() {
       {/* 照合の説明 */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm text-blue-800">
         <p className="font-medium mb-1">照合ロジック</p>
-        <p className="text-xs">AIがメールから抽出した項目値（施主コード・回収日など）がCSVのいずれかの列に存在すれば「反映済み」と判定します。CSVを新しいものに差し替えたら「再照合」を実行してください。</p>
+        <p className="text-xs">AIがメールから抽出した項目値（コード・回収日など）がCSVのいずれかの列に存在すれば「反映済み」と判定します。CSVを新しいものに差し替えたら「再照合」を実行してください。</p>
       </div>
 
       {/* Upload List */}

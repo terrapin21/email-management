@@ -196,8 +196,8 @@ export default function EmailDetailPage() {
   if (isLoading) return <div className="p-8 text-center text-gray-400">読み込み中...</div>
   if (!email) return <div className="p-8 text-center text-gray-400">メールが見つかりません</div>
 
-  const SITE_ID_KEYWORDS = ['施主', '工事番号', '現場コード', '現場no', '発注no', '案件no', '物件コード', 'site id', 'site no', 'site code', 'genba no']
-  const isSiteIdField = (name: string) => SITE_ID_KEYWORDS.some(k => name.toLowerCase().includes(k.toLowerCase()))
+  const CODE_KEYWORDS = ['コード', '施主', '工事番号', '現場コード', '現場no', '発注no', '案件no', '物件コード', 'site id', 'site no', 'site code', 'genba no']
+  const isCodeField = (name: string) => CODE_KEYWORDS.some(k => name.toLowerCase().includes(k.toLowerCase()))
 
   const buildFields = (): Record<string, string> => {
     const fields: Record<string, string> = {}
@@ -230,12 +230,12 @@ export default function EmailDetailPage() {
       result = result.replace(new RegExp(`\\{${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`, 'g'), value)
     }
 
-    // 2. 未解決の施主No系タグを、メール内の施主No系フィールド値で補完
-    const siteIdEntry = Object.entries(fields).find(([k, v]) => isSiteIdField(k) && v)
+    // 2. 未解決のコード系タグを、メール内のコードフィールド値で補完
+    const siteIdEntry = Object.entries(fields).find(([k, v]) => isCodeField(k) && v)
     if (siteIdEntry) {
       const siteIdValue = siteIdEntry[1]
       result = result.replace(/\{([^}]+)\}/g, (match, name) =>
-        isSiteIdField(name) ? siteIdValue : match
+        isCodeField(name) ? siteIdValue : match
       )
     }
 
@@ -310,10 +310,14 @@ export default function EmailDetailPage() {
 
   // フィールド名が日付系かどうか判定
   const isDateField = (name: string): boolean =>
-    /日$|日時$|date|期限|期日|納期|予定|希望日|回収日|納品日/i.test(name)
+    /日$|日時$|date|期限|期日|納期|予定|希望日|回収日|納品日|工事日/i.test(name)
 
-  const isMultipleSiteCodes = (f: { field_name: string; field_value?: string; group_id?: string }) =>
-    !!f.group_id && isSiteIdField(f.field_name) && !!f.field_value && f.field_value.split(',').filter(v => v.trim()).length > 1
+  // Power Automate Desktop で安定して要素を指定できるよう、スペース・括弧等を除去したIDを生成
+  const toSafeId = (name: string): string =>
+    name.replace(/[\s　（）()【】「」]/g, '')
+
+  const isMultipleCodes = (f: { field_name: string; field_value?: string; group_id?: string }) =>
+    !!f.group_id && isCodeField(f.field_name) && !!f.field_value && f.field_value.split(',').filter(v => v.trim()).length > 1
 
   const priorityColor: Record<string, string> = {
     high: 'text-red-500 bg-red-50',
@@ -526,9 +530,9 @@ export default function EmailDetailPage() {
                         <div className="text-xs text-green-500 mb-1.5">{f.field_name}</div>
                         <div className="flex gap-3">
                           {[
-                            { label: '年', value: dateParts.year, id: `field-value-${f.field_name}-年` },
-                            { label: '月', value: dateParts.month, id: `field-value-${f.field_name}-月` },
-                            { label: '日', value: dateParts.day, id: `field-value-${f.field_name}-日` },
+                            { label: '年', value: dateParts.year, id: `field-value-${toSafeId(f.field_name)}-年` },
+                            { label: '月', value: dateParts.month, id: `field-value-${toSafeId(f.field_name)}-月` },
+                            { label: '日', value: dateParts.day, id: `field-value-${toSafeId(f.field_name)}-日` },
                           ].map(({ label, value, id }) => (
                             <div key={label} className="flex items-baseline gap-1">
                               <span id={id} className="text-sm font-bold text-gray-900">{value}</span>
@@ -539,19 +543,19 @@ export default function EmailDetailPage() {
                       </div>
                     )
                   }
-                  const multiple = isMultipleSiteCodes(f)
-                  const displayName = multiple ? `${f.field_name}（複数現場）` : f.field_name
+                  const multiple = isMultipleCodes(f)
+                  const displayName = multiple ? `${f.field_name}（複数コード）` : f.field_name
                   return (
-                    <div key={f.id} id={`field-card-${f.field_name}`} className={`bg-white rounded-lg p-2.5 border ${multiple ? 'border-amber-200 col-span-2' : 'border-green-100'}`}>
+                    <div key={f.id} id={`field-card-${toSafeId(f.field_name)}`} className={`bg-white rounded-lg p-2.5 border ${multiple ? 'border-amber-200 col-span-2' : 'border-green-100'}`}>
                       <div className={`text-xs mb-0.5 flex items-center gap-2 ${multiple ? 'text-amber-600 font-semibold' : 'text-green-500'}`}>
                         {displayName}
                         {multiple && f.group_id && (
-                          <span className="text-[10px] font-mono bg-amber-50 text-amber-400 border border-amber-200 rounded px-1.5 py-0.5 tracking-wider select-all" title="複数現場グループID">
+                          <span className="text-[10px] font-mono bg-amber-50 text-amber-400 border border-amber-200 rounded px-1.5 py-0.5 tracking-wider select-all" title="複数コードグループID">
                             ID: {f.group_id}
                           </span>
                         )}
                       </div>
-                      <div id={`field-value-${f.field_name}`} className="text-sm font-medium text-gray-900">{f.field_value || '―'}</div>
+                      <div id={`field-value-${toSafeId(f.field_name)}`} className="text-sm font-medium text-gray-900">{f.field_value || '―'}</div>
                     </div>
                   )
                 })}
