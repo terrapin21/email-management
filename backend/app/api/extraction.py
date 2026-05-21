@@ -32,6 +32,7 @@ def create_config(
         excel_file_path=payload.excel_file_path,
         map_save_path=payload.map_save_path,
         map_date_field=payload.map_date_field,
+        map_required=payload.map_required,
     )
     db.add(config)
     db.flush()
@@ -43,6 +44,7 @@ def create_config(
             field_type=f.field_type,
             required=f.required,
             order=f.order if f.order else i,
+            aliases=f.aliases,
         )
         db.add(field)
 
@@ -72,6 +74,8 @@ def update_config(
         config.map_save_path = payload.map_save_path
     if payload.map_date_field is not None:
         config.map_date_field = payload.map_date_field
+    if payload.map_required is not None:
+        config.map_required = payload.map_required
 
     if payload.fields is not None:
         db.query(models.ExtractionField).filter(
@@ -84,6 +88,7 @@ def update_config(
                 field_type=f.field_type,
                 required=f.required,
                 order=f.order if f.order else i,
+                aliases=f.aliases,
             )
             db.add(field)
 
