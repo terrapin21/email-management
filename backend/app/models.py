@@ -324,6 +324,7 @@ class MakerExtractionConfig(Base):
     excel_file_path = Column(String(1000))
     map_save_path = Column(String(1000))
     map_date_field = Column(String(100), default="回収日")
+    map_required = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

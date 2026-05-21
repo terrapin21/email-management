@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Plus, Trash2, Edit2, GripVertical, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Trash2, Edit2, ChevronDown, ChevronUp } from 'lucide-react'
 import {
   getExtractionConfigs,
   createExtractionConfig,
@@ -24,6 +24,7 @@ interface MakerConfig {
   excel_file_path: string | null
   map_save_path: string | null
   map_date_field: string
+  map_required: boolean
   fields: ExtractionField[]
 }
 
@@ -39,6 +40,7 @@ const emptyForm = () => ({
   excel_file_path: '',
   map_save_path: '',
   map_date_field: '回収日',
+  map_required: false,
   fields: [] as ExtractionField[],
 })
 
@@ -86,6 +88,7 @@ export default function ExtractionConfigs() {
       excel_file_path: c.excel_file_path || '',
       map_save_path: c.map_save_path || '',
       map_date_field: c.map_date_field,
+      map_required: c.map_required,
       fields: c.fields.map(f => ({ ...f })),
     })
     setShowModal(true)
@@ -178,6 +181,9 @@ export default function ExtractionConfigs() {
                 {expandedId === c.id ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
                 <span className="font-medium text-gray-900">{c.maker_name}</span>
                 <span className="text-xs text-gray-400">{c.fields.length}フィールド</span>
+                {c.map_required && (
+                  <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">地図必須</span>
+                )}
               </div>
               {user?.is_admin && (
                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -209,6 +215,10 @@ export default function ExtractionConfigs() {
                     <span className="text-gray-500">地図ファイル名の日付フィールド:</span>
                     <p className="font-medium text-gray-700 mt-1">{c.map_date_field}</p>
                   </div>
+                  <div>
+                    <span className="text-gray-500">地図ファイル:</span>
+                    <p className="font-medium text-gray-700 mt-1">{c.map_required ? '必須（ない場合は要確認）' : '任意'}</p>
+                  </div>
                 </div>
 
                 <table className="w-full text-sm border border-gray-100 rounded-lg overflow-hidden">
@@ -224,7 +234,9 @@ export default function ExtractionConfigs() {
                     {c.fields.map(f => (
                       <tr key={f.id} className="border-t border-gray-100">
                         <td className="px-3 py-2 font-medium text-gray-900">{f.field_name}</td>
-                        <td className="px-3 py-2 text-gray-500">{f.field_type}</td>
+                        <td className="px-3 py-2 text-gray-500">
+                          {f.field_type === 'code' ? 'コード' : f.field_type === 'date' ? '日付' : 'テキスト'}
+                        </td>
                         <td className="px-3 py-2">{f.required ? <span className="text-red-500">必須</span> : <span className="text-gray-400">任意</span>}</td>
                         <td className="px-3 py-2 text-gray-400">{f.order + 1}</td>
                       </tr>
@@ -280,25 +292,43 @@ export default function ExtractionConfigs() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">地図ファイル名に使う日付フィールド名</label>
-                <input
-                  type="text"
-                  value={form.map_date_field}
-                  onChange={e => setForm({ ...form, map_date_field: e.target.value })}
-                  placeholder="回収日"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <p className="text-xs text-gray-400 mt-1">{'地図ファイル名: {コード}_{このフィールドの値}.pdf'}</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">地図ファイル名に使う日付フィールド名</label>
+                  <input
+                    type="text"
+                    value={form.map_date_field}
+                    onChange={e => setForm({ ...form, map_date_field: e.target.value })}
+                    placeholder="回収日"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">保存ファイル名: コードの値_このフィールドの値.拡張子</p>
+                </div>
+                <div className="flex flex-col justify-center">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.map_required}
+                      onChange={e => setForm({ ...form, map_required: e.target.checked })}
+                      className="w-4 h-4 rounded text-indigo-600"
+                    />
+                    <span className="text-sm font-medium text-gray-700">地図ファイルを必須にする</span>
+                  </label>
+                  <p className="text-xs text-gray-400 mt-1 ml-6">チェックON: 地図がない場合は「要確認」になります</p>
+                </div>
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-1">
                   <label className="text-sm font-medium text-gray-700">抽出フィールド</label>
                   <button onClick={addField} className="flex items-center gap-1 text-indigo-600 text-xs hover:underline">
                     <Plus size={12} /> フィールド追加
                   </button>
                 </div>
+                <p className="text-xs text-gray-400 mb-2">
+                  フィールド名は日本語でそのまま入力してください（例: <span className="font-mono">コード</span>、<span className="font-mono">回収日</span>、<span className="font-mono">現場名</span>）。
+                  AIがこの名前で書類から値を探します。種別は「コード」「日付」「テキスト」から選択。
+                </p>
 
                 {form.fields.length === 0 && (
                   <div className="text-center py-6 border border-dashed border-gray-200 rounded-lg text-gray-400 text-sm">

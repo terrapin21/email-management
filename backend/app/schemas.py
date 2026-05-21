@@ -471,6 +471,7 @@ class MakerExtractionConfigCreate(BaseModel):
     excel_file_path: Optional[str] = None
     map_save_path: Optional[str] = None
     map_date_field: str = "回収日"
+    map_required: bool = False
     fields: List[ExtractionFieldCreate] = []
 
 
@@ -479,6 +480,7 @@ class MakerExtractionConfigUpdate(BaseModel):
     excel_file_path: Optional[str] = None
     map_save_path: Optional[str] = None
     map_date_field: Optional[str] = None
+    map_required: Optional[bool] = None
     fields: Optional[List[ExtractionFieldCreate]] = None
 
 
@@ -488,6 +490,7 @@ class MakerExtractionConfigOut(BaseModel):
     excel_file_path: Optional[str]
     map_save_path: Optional[str]
     map_date_field: str
+    map_required: bool
     fields: List[ExtractionFieldOut] = []
     created_at: datetime
 

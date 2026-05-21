@@ -39,6 +39,13 @@ def init_db():
         except Exception:
             db.rollback()
 
+        # maker_extraction_configs に map_required カラムを追加
+        try:
+            db.execute(text("ALTER TABLE maker_extraction_configs ADD COLUMN IF NOT EXISTS map_required BOOLEAN DEFAULT FALSE"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
         admin = db.query(models.User).filter(models.User.is_admin == True).first()
         if not admin:
             admin_user = models.User(

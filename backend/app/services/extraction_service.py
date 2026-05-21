@@ -409,6 +409,11 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
         else:
             review_reason = "メール本文が空です"
 
+    # 地図必須チェック
+    if config.map_required and not map_file_paths and status == "completed":
+        status = "needs_review"
+        review_reason = "地図ファイルが見つかりませんでした（必須設定）"
+
     # Excel書き込みと地図保存
     excel_written = False
     if status == "completed" and extracted_data:
