@@ -160,7 +160,7 @@ def confirm_result(
     current_user: models.User = Depends(get_current_user),
 ):
     """要確認の結果を手動で確認済みにしてExcelに書き込む"""
-    from app.services.extraction_service import write_excel_row, save_map_files
+    from app.services.extraction_service import write_excel_row, save_map_to_nas
     result = db.query(models.ExtractionResult).filter(
         models.ExtractionResult.id == result_id
     ).first()
