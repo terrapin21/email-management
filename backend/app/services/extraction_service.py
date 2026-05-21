@@ -259,10 +259,15 @@ def analyze_file_with_confidence(file_path: str, filename: str, config: models.M
 def _get_smb_session():
     import smbclient
     host = settings.NAS_HOST
-    if settings.NAS_USERNAME:
-        smbclient.register_session(host, username=settings.NAS_USERNAME, password=settings.NAS_PASSWORD)
-    else:
-        smbclient.register_session(host, username="guest", password="")
+    username = settings.NAS_USERNAME or "guest"
+    password = settings.NAS_PASSWORD or ""
+    smbclient.register_session(
+        host,
+        username=username,
+        password=password,
+        require_signing=False,
+        connection_timeout=30,
+    )
 
 
 def _safe_filename(value: str) -> str:
