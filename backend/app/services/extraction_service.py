@@ -111,7 +111,9 @@ def _parse_excel_text(file_path: str) -> str:
         return str(val)
 
     try:
-        wb = load_workbook(file_path, data_only=True)
+        with open(file_path, "rb") as f:
+            raw = f.read()
+        wb = load_workbook(io.BytesIO(raw), data_only=True)
         lines = []
         for ws in wb.worksheets:
             lines.append(f"シート: {ws.title}")
