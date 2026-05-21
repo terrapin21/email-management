@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Mail, Tag, Forward, Server, Users, BarChart3, LogOut, DatabaseZap, FileSearch, MessageSquare, Pencil, X } from 'lucide-react'
+import { Mail, Tag, Forward, Server, Users, BarChart3, LogOut, DatabaseZap, FileSearch, MessageSquare, Pencil, X, TableProperties } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useMutation } from '@tanstack/react-query'
 import { updateUser } from '../api/client'
@@ -15,6 +15,7 @@ const navItems = [
   { to: '/accounts', icon: Server, label: 'メールアカウント' },
   { to: '/csv', icon: DatabaseZap, label: 'CSV照合' },
   { to: '/documents', icon: FileSearch, label: '書類解析' },
+  { to: '/extraction', icon: TableProperties, label: '抽出設定' },
 ]
 
 export default function Sidebar() {

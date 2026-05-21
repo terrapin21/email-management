@@ -8,6 +8,7 @@ const config: Record<EmailStatus, { label: string; cls: string }> = {
   pending: { label: '保留', cls: 'bg-orange-100 text-orange-800' },
   escalated: { label: 'エスカレーション', cls: 'bg-red-100 text-red-800' },
   replied: { label: '返信済み', cls: 'bg-purple-100 text-purple-800' },
+  needs_review: { label: '要確認', cls: 'bg-amber-100 text-amber-800' },
 }
 
 export default function StatusBadge({ status }: { status: EmailStatus }) {

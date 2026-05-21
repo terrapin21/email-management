@@ -13,6 +13,7 @@ import Users from './pages/Users'
 import CsvManagement from './pages/CsvManagement'
 import DocumentAnalyzer from './pages/DocumentAnalyzer'
 import ReplyTemplates from './pages/ReplyTemplates'
+import ExtractionConfigs from './pages/ExtractionConfigs'
 
 function ProtectedLayout() {
   const { user, loading } = useAuth()
@@ -33,6 +34,7 @@ function ProtectedLayout() {
           <Route path="/csv" element={<CsvManagement />} />
           <Route path="/documents" element={<DocumentAnalyzer />} />
           <Route path="/reply-templates" element={<ReplyTemplates />} />
+          <Route path="/extraction" element={<ExtractionConfigs />} />
         </Routes>
       </main>
     </div>

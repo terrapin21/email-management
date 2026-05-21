@@ -7,7 +7,7 @@ from app.database import engine, SessionLocal
 from app import models
 from app.auth import hash_password
 from app.config import settings
-from app.api import auth, users, accounts, labels, forwarding, emails, csv_api, documents, reply, archives
+from app.api import auth, users, accounts, labels, forwarding, emails, csv_api, documents, reply, archives, extraction
 from app.tasks.worker import start_scheduler, stop_scheduler
 from app.url_cache import set_site_url
 
@@ -28,6 +28,13 @@ def init_db():
         # email_fields に group_id カラムを追加（既存DBへの後付け対応）
         try:
             db.execute(text("ALTER TABLE email_fields ADD COLUMN IF NOT EXISTS group_id VARCHAR(36)"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        # needs_review を EmailStatusEnum に追加
+        try:
+            db.execute(text("ALTER TYPE emailstatusenum ADD VALUE IF NOT EXISTS 'needs_review'"))
             db.commit()
         except Exception:
             db.rollback()
@@ -91,6 +98,7 @@ app.include_router(csv_api.router)
 app.include_router(documents.router)
 app.include_router(reply.router)
 app.include_router(archives.router)
+app.include_router(extraction.router)
 
 
 @app.get("/health")

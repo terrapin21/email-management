@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     FIRST_ADMIN_PASSWORD: str = "changeme"
     FIRST_ADMIN_USERNAME: str = "admin"
     SITE_URL: str = "http://localhost"
+    NAS_HOST: str = "192.168.1.195"
+    NAS_SHARE: str = "disk1"
+    NAS_USERNAME: str = ""
+    NAS_PASSWORD: str = ""
 
     class Config:
         env_file = ".env"

@@ -19,6 +19,7 @@ const STATUS_OPTIONS = [
   { value: 'pending', label: '保留' },
   { value: 'escalated', label: 'エスカレーション' },
   { value: 'replied', label: '返信済み' },
+  { value: 'needs_review', label: '要確認' },
 ]
 
 const PRIORITY_OPTIONS = [

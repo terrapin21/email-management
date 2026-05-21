@@ -444,3 +444,67 @@ class EncryptedArchiveOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ── Extraction ────────────────────────────────────────────────────────────────
+
+class ExtractionFieldCreate(BaseModel):
+    field_name: str
+    field_type: str = "text"
+    required: bool = True
+    order: int = 0
+
+
+class ExtractionFieldOut(BaseModel):
+    id: int
+    field_name: str
+    field_type: str
+    required: bool
+    order: int
+
+    class Config:
+        from_attributes = True
+
+
+class MakerExtractionConfigCreate(BaseModel):
+    maker_name: str
+    excel_file_path: Optional[str] = None
+    map_save_path: Optional[str] = None
+    map_date_field: str = "回収日"
+    fields: List[ExtractionFieldCreate] = []
+
+
+class MakerExtractionConfigUpdate(BaseModel):
+    maker_name: Optional[str] = None
+    excel_file_path: Optional[str] = None
+    map_save_path: Optional[str] = None
+    map_date_field: Optional[str] = None
+    fields: Optional[List[ExtractionFieldCreate]] = None
+
+
+class MakerExtractionConfigOut(BaseModel):
+    id: int
+    maker_name: str
+    excel_file_path: Optional[str]
+    map_save_path: Optional[str]
+    map_date_field: str
+    fields: List[ExtractionFieldOut] = []
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ExtractionResultOut(BaseModel):
+    id: int
+    email_id: int
+    config_id: int
+    extracted_data: Dict[str, Any]
+    status: str
+    review_reason: Optional[str]
+    attachment_pattern: Optional[str]
+    excel_written: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

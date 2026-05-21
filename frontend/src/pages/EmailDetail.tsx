@@ -5,7 +5,8 @@ import {
   getEmail, updateEmailStatus, confirmEmail, setEmailLabels,
   reanalyzeEmail, refetchEmailBody, getLabels, getEmailActivities, getUsers,
   downloadAttachment, prefetchAttachments, forwardEmail, getReplyTemplates, sendReply, getReplyLogs,
-  getRelatedEmails, getEmailArchives, retryArchiveExtraction, downloadExtractedFile
+  getRelatedEmails, getEmailArchives, retryArchiveExtraction, downloadExtractedFile,
+  processExtraction, getExtractionResults, confirmExtractionResult,
 } from '../api/client'
 import { EmailDetail as IEmailDetail, Label, User, ReplyTemplate, ReplyLog, RelatedEmail, EncryptedArchive } from '../types'
 import StatusBadge from '../components/StatusBadge'
@@ -16,7 +17,7 @@ import toast from 'react-hot-toast'
 import {
   ArrowLeft, Bot, CheckCircle, Tag, RefreshCw, User as UserIcon,
   AlertTriangle, Package, FileText, ListChecks, Paperclip, Download, DatabaseZap, Forward, Link,
-  MessageSquare, Send, ChevronDown, ChevronUp, ExternalLink, Archive, Clock, XCircle
+  MessageSquare, Send, ChevronDown, ChevronUp, ExternalLink, Archive, Clock, XCircle, TableProperties
 } from 'lucide-react'
 
 const STATUS_OPTIONS = [
@@ -116,6 +117,31 @@ export default function EmailDetailPage() {
       toast.success('AI再解析を開始しました')
       setTimeout(() => qc.invalidateQueries({ queryKey: ['email', emailId] }), 5000)
     },
+  })
+
+  const { data: extractionResults = [] } = useQuery({
+    queryKey: ['extraction-results', emailId],
+    queryFn: () => getExtractionResults(emailId).then(r => r.data),
+    refetchInterval: 5000,
+  })
+
+  const extractMut = useMutation({
+    mutationFn: () => processExtraction(emailId),
+    onSuccess: () => {
+      toast.success('抽出処理を開始しました')
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['extraction-results', emailId] }), 3000)
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || '抽出処理に失敗しました'),
+  })
+
+  const confirmExtractionMut = useMutation({
+    mutationFn: (resultId: number) => confirmExtractionResult(resultId),
+    onSuccess: () => {
+      toast.success('Excel に書き込みました')
+      qc.invalidateQueries({ queryKey: ['extraction-results', emailId] })
+      qc.invalidateQueries({ queryKey: ['email', emailId] })
+    },
+    onError: () => toast.error('Excel 書き込みに失敗しました'),
   })
 
   const refetchMut = useMutation({
@@ -565,6 +591,67 @@ export default function EmailDetailPage() {
               </p>
             </div>
           )}
+
+          {/* Extraction Results */}
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <TableProperties size={16} className="text-purple-600" />
+                <h3 className="font-semibold text-gray-800 text-sm">自動抽出・Excel書き込み</h3>
+              </div>
+              <button
+                onClick={() => extractMut.mutate()}
+                disabled={extractMut.isPending}
+                className="flex items-center gap-1 text-xs text-purple-600 hover:underline disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={extractMut.isPending ? 'animate-spin' : ''} />
+                {extractMut.isPending ? '処理中...' : '抽出実行'}
+              </button>
+            </div>
+
+            {extractionResults.length === 0 ? (
+              <p className="text-sm text-gray-400">まだ抽出処理が実行されていません</p>
+            ) : (
+              <div className="space-y-3">
+                {extractionResults.map((r: any) => (
+                  <div key={r.id} className={`rounded-lg border p-3 ${r.status === 'completed' ? 'border-green-200 bg-green-50' : r.status === 'needs_review' ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${r.status === 'completed' ? 'bg-green-100 text-green-700' : r.status === 'needs_review' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {r.status === 'completed' ? '完了' : r.status === 'needs_review' ? '要確認' : r.status}
+                      </span>
+                      <span className="text-xs text-gray-400">{r.attachment_pattern}</span>
+                    </div>
+                    {r.review_reason && (
+                      <p className="text-xs text-amber-700 mb-2">{r.review_reason}</p>
+                    )}
+                    {Object.keys(r.extracted_data || {}).length > 0 && (
+                      <div className="grid grid-cols-2 gap-1.5 mb-2">
+                        {Object.entries(r.extracted_data).map(([k, v]) => (
+                          <div key={k} className="bg-white rounded p-1.5 border border-gray-100">
+                            <div className="text-xs text-gray-400">{k}</div>
+                            <div className="text-sm font-medium text-gray-900">{String(v ?? '―')}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      {r.excel_written ? (
+                        <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle size={11} /> Excel書き込み済み</span>
+                      ) : r.status === 'needs_review' ? (
+                        <button
+                          onClick={() => confirmExtractionMut.mutate(r.id)}
+                          disabled={confirmExtractionMut.isPending}
+                          className="text-xs bg-amber-600 text-white rounded px-2 py-1 hover:bg-amber-700 disabled:opacity-50"
+                        >
+                          手動でExcel書き込み
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Attachments */}
           {email.attachments && email.attachments.length > 0 && (

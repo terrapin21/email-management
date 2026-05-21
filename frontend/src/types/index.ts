@@ -1,5 +1,5 @@
 export type LabelType = 'manufacturer' | 'category' | 'priority' | 'custom'
-export type EmailStatus = 'unread' | 'read' | 'in_progress' | 'completed' | 'pending' | 'escalated' | 'replied'
+export type EmailStatus = 'unread' | 'read' | 'in_progress' | 'completed' | 'pending' | 'escalated' | 'replied' | 'needs_review'
 export type Priority = 'high' | 'medium' | 'low'
 
 export interface User {

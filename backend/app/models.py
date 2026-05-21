@@ -16,6 +16,7 @@ class EmailStatusEnum(str, enum.Enum):
     pending = "pending"
     escalated = "escalated"
     replied = "replied"
+    needs_review = "needs_review"
 
 
 class LabelTypeEnum(str, enum.Enum):
@@ -119,6 +120,7 @@ class Email(Base):
     attachments = relationship("EmailAttachment", back_populates="email", cascade="all, delete-orphan")
     reply_logs = relationship("ReplyLog", back_populates="email", cascade="all, delete-orphan")
     encrypted_archives = relationship("EncryptedArchive", foreign_keys="EncryptedArchive.email_id", back_populates="email", cascade="all, delete-orphan")
+    extraction_results = relationship("ExtractionResult", back_populates="email", cascade="all, delete-orphan")
 
 
 class EmailLabel(Base):
@@ -312,6 +314,51 @@ class ExtractedFile(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     archive = relationship("EncryptedArchive", back_populates="extracted_files")
+
+
+class MakerExtractionConfig(Base):
+    __tablename__ = "maker_extraction_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    maker_name = Column(String(255), nullable=False, unique=True)
+    excel_file_path = Column(String(1000))
+    map_save_path = Column(String(1000))
+    map_date_field = Column(String(100), default="回収日")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    fields = relationship("ExtractionField", back_populates="config", cascade="all, delete-orphan", order_by="ExtractionField.order")
+    results = relationship("ExtractionResult", back_populates="config")
+
+
+class ExtractionField(Base):
+    __tablename__ = "extraction_fields_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    config_id = Column(Integer, ForeignKey("maker_extraction_configs.id"), nullable=False)
+    field_name = Column(String(100), nullable=False)
+    field_type = Column(String(20), default="text")  # text, code, date
+    required = Column(Boolean, default=True)
+    order = Column(Integer, default=0)
+
+    config = relationship("MakerExtractionConfig", back_populates="fields")
+
+
+class ExtractionResult(Base):
+    __tablename__ = "extraction_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email_id = Column(Integer, ForeignKey("emails.id"), nullable=False)
+    config_id = Column(Integer, ForeignKey("maker_extraction_configs.id"), nullable=False)
+    extracted_data = Column(JSON, default=dict)
+    status = Column(String(20), default="pending")  # pending/completed/needs_review/error
+    review_reason = Column(Text)
+    attachment_pattern = Column(String(20))  # case1/case2/case3/case4/pattern2
+    excel_written = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    email = relationship("Email", back_populates="extraction_results")
+    config = relationship("MakerExtractionConfig", back_populates="results")
 
 
 class ReplyLog(Base):

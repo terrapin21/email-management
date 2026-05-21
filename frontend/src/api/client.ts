@@ -58,6 +58,15 @@ export const updateForwardingRule = (id: number, d: object) => api.put(`/forward
 export const deleteForwardingRule = (id: number) => api.delete(`/forwarding/${id}`)
 export const toggleForwardingRule = (id: number) => api.post(`/forwarding/${id}/toggle`)
 
+// Extraction
+export const getExtractionConfigs = () => api.get('/extraction/configs')
+export const createExtractionConfig = (d: object) => api.post('/extraction/configs', d)
+export const updateExtractionConfig = (id: number, d: object) => api.put(`/extraction/configs/${id}`, d)
+export const deleteExtractionConfig = (id: number) => api.delete(`/extraction/configs/${id}`)
+export const processExtraction = (emailId: number) => api.post(`/extraction/process/${emailId}`)
+export const getExtractionResults = (emailId: number) => api.get(`/extraction/results/${emailId}`)
+export const confirmExtractionResult = (resultId: number) => api.put(`/extraction/results/${resultId}/confirm`)
+
 // Emails
 export const getEmails = (params: object) => api.get('/emails', { params })
 export const getEmailStats = () => api.get('/emails/stats')
