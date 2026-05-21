@@ -341,6 +341,7 @@ class ExtractionField(Base):
     field_type = Column(String(20), default="text")  # text, code, date
     required = Column(Boolean, default=True)
     order = Column(Integer, default=0)
+    aliases = Column(JSON, default=list)  # 別名キーワードリスト
 
     config = relationship("MakerExtractionConfig", back_populates="fields")
 

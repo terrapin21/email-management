@@ -101,20 +101,28 @@ def extract_text_from_excel(file_path: str) -> str:
 
 # ── AI 抽出 ───────────────────────────────────────────────────────────────────
 
+def _field_label(f: models.ExtractionField) -> str:
+    aliases = f.aliases or []
+    if aliases:
+        return f"{f.field_name}（別の呼び方: {'、'.join(aliases)}）"
+    return f.field_name
+
+
 def _build_extraction_prompt(config: models.MakerExtractionConfig) -> str:
-    required = [f.field_name for f in config.fields if f.required]
-    optional = [f.field_name for f in config.fields if not f.required]
-    fields_desc = "必須: " + ", ".join(required)
+    required = [f for f in config.fields if f.required]
+    optional = [f for f in config.fields if not f.required]
+    fields_desc = "必須: " + ", ".join(_field_label(f) for f in required)
     if optional:
-        fields_desc += "\n任意: " + ", ".join(optional)
-    all_fields = required + optional
-    example = "{" + ", ".join(f'"{f}": "値"' for f in all_fields[:3]) + "}"
+        fields_desc += "\n任意: " + ", ".join(_field_label(f) for f in optional)
+    all_names = [f.field_name for f in config.fields]
+    example = "{" + ", ".join(f'"{n}": "値"' for n in all_names[:3]) + "}"
     return f"""あなたは回収依頼書類から情報を抽出するアシスタントです。
 メーカー: {config.maker_name}
 抽出項目:
 {fields_desc}
 
 書類の内容を解析して、抽出項目の値をJSONのみで返してください。
+別の呼び方が記載されていても同じ項目として扱い、JSONのキーは必ず左側の名前を使用してください。
 見つからない場合は null を使用。日付は YYYY-MM-DD 形式。
 例: {example}
 JSON以外は絶対に出力しないでください。"""

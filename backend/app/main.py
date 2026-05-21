@@ -46,6 +46,13 @@ def init_db():
         except Exception:
             db.rollback()
 
+        # extraction_fields_config に aliases カラムを追加
+        try:
+            db.execute(text("ALTER TABLE extraction_fields_config ADD COLUMN IF NOT EXISTS aliases JSON DEFAULT '[]'"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
         admin = db.query(models.User).filter(models.User.is_admin == True).first()
         if not admin:
             admin_user = models.User(

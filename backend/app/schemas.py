@@ -453,6 +453,7 @@ class ExtractionFieldCreate(BaseModel):
     field_type: str = "text"
     required: bool = True
     order: int = 0
+    aliases: List[str] = []
 
 
 class ExtractionFieldOut(BaseModel):
@@ -461,6 +462,7 @@ class ExtractionFieldOut(BaseModel):
     field_type: str
     required: bool
     order: int
+    aliases: List[str] = []
 
     class Config:
         from_attributes = True

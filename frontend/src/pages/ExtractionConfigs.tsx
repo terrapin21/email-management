@@ -16,6 +16,7 @@ interface ExtractionField {
   field_type: string
   required: boolean
   order: number
+  aliases: string[]
 }
 
 interface MakerConfig {
@@ -33,6 +34,7 @@ const emptyField = (): ExtractionField => ({
   field_type: 'text',
   required: true,
   order: 0,
+  aliases: [],
 })
 
 const emptyForm = () => ({
@@ -225,20 +227,24 @@ export default function ExtractionConfigs() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="text-left px-3 py-2 font-medium text-gray-600">フィールド名</th>
+                      <th className="text-left px-3 py-2 font-medium text-gray-600">別名キーワード</th>
                       <th className="text-left px-3 py-2 font-medium text-gray-600">種別</th>
                       <th className="text-left px-3 py-2 font-medium text-gray-600">必須</th>
-                      <th className="text-left px-3 py-2 font-medium text-gray-600">順序</th>
                     </tr>
                   </thead>
                   <tbody>
                     {c.fields.map(f => (
                       <tr key={f.id} className="border-t border-gray-100">
                         <td className="px-3 py-2 font-medium text-gray-900">{f.field_name}</td>
+                        <td className="px-3 py-2 text-gray-500 text-xs">
+                          {(f.aliases || []).length > 0
+                            ? (f.aliases || []).join('、')
+                            : <span className="text-gray-300">-</span>}
+                        </td>
                         <td className="px-3 py-2 text-gray-500">
                           {f.field_type === 'code' ? 'コード' : f.field_type === 'date' ? '日付' : 'テキスト'}
                         </td>
                         <td className="px-3 py-2">{f.required ? <span className="text-red-500">必須</span> : <span className="text-gray-400">任意</span>}</td>
-                        <td className="px-3 py-2 text-gray-400">{f.order + 1}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -338,39 +344,51 @@ export default function ExtractionConfigs() {
 
                 <div className="space-y-2">
                   {form.fields.map((f, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
-                      <div className="flex flex-col gap-0.5 cursor-pointer text-gray-300">
-                        <button onClick={() => moveField(idx, -1)} disabled={idx === 0} className="hover:text-gray-500 disabled:opacity-20"><ChevronUp size={12} /></button>
-                        <button onClick={() => moveField(idx, 1)} disabled={idx === form.fields.length - 1} className="hover:text-gray-500 disabled:opacity-20"><ChevronDown size={12} /></button>
-                      </div>
-                      <input
-                        type="text"
-                        value={f.field_name}
-                        onChange={e => updateField(idx, 'field_name', e.target.value)}
-                        placeholder="フィールド名（例: コード、回収日）"
-                        className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                      />
-                      <select
-                        value={f.field_type}
-                        onChange={e => updateField(idx, 'field_type', e.target.value)}
-                        className="bg-white border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none"
-                      >
-                        <option value="text">テキスト</option>
-                        <option value="code">コード</option>
-                        <option value="date">日付</option>
-                      </select>
-                      <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                    <div key={idx} className="bg-gray-50 rounded-lg px-3 py-2 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <div className="flex flex-col gap-0.5 cursor-pointer text-gray-300">
+                          <button onClick={() => moveField(idx, -1)} disabled={idx === 0} className="hover:text-gray-500 disabled:opacity-20"><ChevronUp size={12} /></button>
+                          <button onClick={() => moveField(idx, 1)} disabled={idx === form.fields.length - 1} className="hover:text-gray-500 disabled:opacity-20"><ChevronDown size={12} /></button>
+                        </div>
                         <input
-                          type="checkbox"
-                          checked={f.required}
-                          onChange={e => updateField(idx, 'required', e.target.checked)}
-                          className="rounded"
+                          type="text"
+                          value={f.field_name}
+                          onChange={e => updateField(idx, 'field_name', e.target.value)}
+                          placeholder="総称名（例: コード、監督名）"
+                          className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
                         />
-                        必須
-                      </label>
-                      <button onClick={() => removeField(idx)} className="text-gray-300 hover:text-red-400">
-                        <Trash2 size={14} />
-                      </button>
+                        <select
+                          value={f.field_type}
+                          onChange={e => updateField(idx, 'field_type', e.target.value)}
+                          className="bg-white border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none"
+                        >
+                          <option value="text">テキスト</option>
+                          <option value="code">コード</option>
+                          <option value="date">日付</option>
+                        </select>
+                        <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={f.required}
+                            onChange={e => updateField(idx, 'required', e.target.checked)}
+                            className="rounded"
+                          />
+                          必須
+                        </label>
+                        <button onClick={() => removeField(idx)} className="text-gray-300 hover:text-red-400">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 pl-5">
+                        <span className="text-xs text-gray-400 whitespace-nowrap">別名:</span>
+                        <input
+                          type="text"
+                          value={(f.aliases || []).join(', ')}
+                          onChange={e => updateField(idx, 'aliases', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                          placeholder="施主コード, 現場コード, コード番号（カンマ区切り）"
+                          className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-xs text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
