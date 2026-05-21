@@ -73,40 +73,56 @@ def get_file_kind(filename: str) -> str:
     return "other"
 
 
-# ── テキスト抽出 ──────────────────────────────────────────────────────────────
+# ── テキスト抽出（Excel用） ────────────────────────────────────────────────────
 
-def extract_text_from_pdf(file_path: str) -> str:
-    try:
-        import pdfplumber
-        with pdfplumber.open(file_path) as pdf:
-            parts = []
-            for page in pdf.pages:
-                t = page.extract_text()
-                if t:
-                    parts.append(t)
-                for table in (page.extract_tables() or []):
-                    for row in table:
-                        row_text = " | ".join(str(c or "") for c in row)
-                        if row_text.strip():
-                            parts.append(row_text)
-            return "\n".join(parts).strip()
-    except Exception as e:
-        logger.warning(f"PDF抽出エラー: {e}")
-        return ""
+def _parse_excel_text(file_path: str) -> str:
+    """Excelをテキストに変換（書類解析と同じロジック）"""
+    import datetime as dt
+    from openpyxl.utils.datetime import from_excel
+    _DATE_RE = re.compile(r'y{1,4}|m{1,5}|d{1,4}|年|月|日', re.IGNORECASE)
+    _DATE_MIN, _DATE_MAX = 25569, 73050
 
+    def _cell_val(cell) -> str:
+        val = cell.value
+        if val is None:
+            return ""
+        if isinstance(val, (dt.datetime, dt.date)):
+            return f"{val.year}　{val.month}　{val.day}"
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            try:
+                if cell.is_date:
+                    d = from_excel(val)
+                    return f"{d.year}　{d.month}　{d.day}"
+            except Exception:
+                pass
+            fmt = cell.number_format or ""
+            if _DATE_RE.search(fmt):
+                try:
+                    d = from_excel(val)
+                    return f"{d.year}　{d.month}　{d.day}"
+                except Exception:
+                    pass
+            if _DATE_MIN <= int(val) <= _DATE_MAX:
+                try:
+                    d = from_excel(val)
+                    return f"{d.year}　{d.month}　{d.day}"
+                except Exception:
+                    pass
+        return str(val)
 
-def extract_text_from_excel(file_path: str) -> str:
     try:
         wb = load_workbook(file_path, data_only=True)
-        parts = []
+        lines = []
         for ws in wb.worksheets:
+            lines.append(f"シート: {ws.title}")
             for row in ws.iter_rows():
-                row_text = " | ".join(str(c.value) for c in row if c.value is not None)
-                if row_text.strip():
-                    parts.append(row_text)
-        return "\n".join(parts).strip()
+                cells = [_cell_val(c) for c in row]
+                line = "\t".join(c for c in cells if c.strip())
+                if line:
+                    lines.append(line)
+        return "\n".join(lines).strip()
     except Exception as e:
-        logger.warning(f"Excel抽出エラー: {e}")
+        logger.warning(f"Excel変換エラー: {e}")
         return ""
 
 
@@ -139,73 +155,92 @@ def _build_extraction_prompt(config: models.MakerExtractionConfig) -> str:
 JSON以外は絶対に出力しないでください。"""
 
 
-def extract_fields_from_text(text: str, config: models.MakerExtractionConfig) -> dict:
-    client = _get_ai_client()
-    system = _build_extraction_prompt(config)
-    try:
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=600,
-            system=system,
-            messages=[{"role": "user", "content": f"以下の書類内容から情報を抽出してください:\n\n{text[:4000]}"}],
-        )
-        raw = resp.content[0].text.strip()
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
-        if m:
+def _parse_ai_response(text: str) -> dict:
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        try:
             return json.loads(m.group())
-    except Exception as e:
-        logger.warning(f"AI抽出エラー: {e}")
+        except Exception:
+            pass
     return {}
 
 
-def extract_fields_from_image(image_b64: str, media_type: str, config: models.MakerExtractionConfig) -> dict:
-    client = _get_ai_client()
-    system = _build_extraction_prompt(config)
-    all_fields = [f.field_name for f in config.fields]
-    try:
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=600,
-            system=system,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
-                    {"type": "text", "text": f"この画像から以下の項目をJSONで抽出してください: {', '.join(all_fields)}"},
-                ],
-            }],
-        )
-        raw = resp.content[0].text.strip()
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
-        if m:
-            return json.loads(m.group())
-    except Exception as e:
-        logger.warning(f"画像AI抽出エラー: {e}")
-    return {}
-
-
-def extract_from_image_with_confidence(file_path: str, config: models.MakerExtractionConfig) -> tuple[dict, bool]:
+def analyze_file(file_path: str, filename: str, config: models.MakerExtractionConfig) -> dict:
+    """書類解析システムと同じAPI呼び出しでファイルを解析し、設定フィールドを抽出する"""
     import base64
-    ext = Path(file_path).suffix.lower()
-    media_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
-                 ".gif": "image/gif", ".bmp": "image/bmp", ".webp": "image/webp"}
-    media_type = media_map.get(ext, "image/jpeg")
+    ext = Path(filename).suffix.lower()
+    ai = _get_ai_client()
+    system = _build_extraction_prompt(config)
+    user_text = "この書類から指定された項目をJSONで抽出してください。"
 
-    with open(file_path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
+    try:
+        if ext in (".xlsx", ".xls"):
+            text = _parse_excel_text(file_path)
+            if not text:
+                return {}
+            resp = ai.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=800,
+                system=system,
+                messages=[{"role": "user", "content": f"以下のExcel内容から情報を抽出してください:\n\n{text[:5000]}"}],
+            )
+            return _parse_ai_response(resp.content[0].text)
 
-    results = [extract_fields_from_image(b64, media_type, config) for _ in range(3)]
+        with open(file_path, "rb") as f:
+            b64 = base64.standard_b64encode(f.read()).decode()
 
+        if ext == ".pdf":
+            resp = ai.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=800,
+                system=system,
+                messages=[{"role": "user", "content": [
+                    {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}},
+                    {"type": "text", "text": user_text},
+                ]}],
+                extra_headers={"anthropic-beta": "pdfs-2024-09-25"},
+            )
+            return _parse_ai_response(resp.content[0].text)
+
+        media_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                     ".gif": "image/gif", ".bmp": "image/bmp", ".webp": "image/webp",
+                     ".tiff": "image/jpeg"}
+        mime = media_map.get(ext)
+        if mime:
+            resp = ai.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=800,
+                system=system,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
+                    {"type": "text", "text": user_text},
+                ]}],
+            )
+            return _parse_ai_response(resp.content[0].text)
+
+    except Exception as e:
+        logger.warning(f"書類解析エラー ({filename}): {e}")
+    return {}
+
+
+def analyze_file_with_confidence(file_path: str, filename: str, config: models.MakerExtractionConfig) -> tuple[dict, bool]:
+    """画像ファイルを3回解析して信頼度を確認する"""
+    ext = Path(filename).suffix.lower()
+    media_map = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff"}
+    if ext not in media_map:
+        result = analyze_file(file_path, filename, config)
+        required = [f.field_name for f in config.fields if f.required]
+        confident = bool(result) and all(result.get(f) for f in required)
+        return result, confident
+
+    results = [analyze_file(file_path, filename, config) for _ in range(3)]
     if not any(results):
         return {}, False
 
-    # 全フィールドが3回一致するか確認
     first = results[0]
-    all_match = all(r == first for r in results[1:])
-    if all_match and first:
+    if all(r == first for r in results[1:]) and first:
         return first, True
 
-    # 一致するフィールドのみ採用
     merged = {}
     for key in first:
         vals = [r.get(key) for r in results]
@@ -213,7 +248,7 @@ def extract_from_image_with_confidence(file_path: str, config: models.MakerExtra
             merged[key] = first[key]
 
     required = [f.field_name for f in config.fields if f.required]
-    confident = all(merged.get(f) for f in required)
+    confident = bool(merged) and all(merged.get(f) for f in required)
     return merged, confident
 
 
@@ -339,31 +374,19 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
 
             kind = get_file_kind(req_att.filename)
 
-            if kind in ("excel", "pdf"):
-                attachment_pattern = "case1"
+            if kind in ("excel", "pdf", "image"):
+                attachment_pattern = f"case{'1' if kind != 'image' else '2'}"
                 processed_any = True
-                if kind == "excel":
-                    content = extract_text_from_excel(fpath)
+                data, confident = analyze_file_with_confidence(fpath, req_att.filename, config)
+                if data:
+                    extracted_data = data
+                    if confident:
+                        status = "completed"
+                    else:
+                        status = "needs_review"
+                        review_reason = "解析結果の信頼度が不足しています（必須項目が取得できませんでした）"
                 else:
-                    content = extract_text_from_pdf(fpath)
-
-                if content:
-                    extracted_data = extract_fields_from_text(content, config)
-                    status = "completed" if extracted_data else "needs_review"
-                    if not extracted_data:
-                        review_reason = "AIが情報を抽出できませんでした"
-                else:
-                    review_reason = "ドキュメントからテキストを取得できませんでした"
-
-            elif kind == "image":
-                attachment_pattern = "case2"
-                processed_any = True
-                extracted_data, confident = extract_from_image_with_confidence(fpath, config)
-                if confident:
-                    status = "completed"
-                else:
-                    status = "needs_review"
-                    review_reason = "画像解析の信頼度が不足しています（3回の解析結果が一致しませんでした）"
+                    review_reason = "AIが書類から情報を抽出できませんでした"
 
             elif kind == "archive":
                 attachment_pattern = "case3"
@@ -428,10 +451,26 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
         # パターン2: メール本文から抽出
         attachment_pattern = "pattern2"
         if email.body_text:
-            extracted_data = extract_fields_from_text(email.body_text, config)
-            status = "completed" if extracted_data else "needs_review"
-            if not extracted_data:
-                review_reason = "本文から情報を抽出できませんでした"
+            ai = _get_ai_client()
+            system = _build_extraction_prompt(config)
+            try:
+                resp = ai.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=800,
+                    system=system,
+                    messages=[{"role": "user", "content": f"以下のメール本文から情報を抽出してください:\n\n{email.body_text[:5000]}"}],
+                )
+                extracted_data = _parse_ai_response(resp.content[0].text)
+                required = [f.field_name for f in config.fields if f.required]
+                if extracted_data and all(extracted_data.get(f) for f in required):
+                    status = "completed"
+                elif extracted_data:
+                    status = "needs_review"
+                    review_reason = "必須項目の一部が取得できませんでした"
+                else:
+                    review_reason = "本文から情報を抽出できませんでした"
+            except Exception as e:
+                review_reason = f"本文解析エラー: {e}"
         else:
             review_reason = "メール本文が空です"
 
