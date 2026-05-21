@@ -260,7 +260,7 @@ LOCAL_OUTPUT_BASE = Path("/app/nas_output")
 
 
 def _nas_to_local(nas_path: str) -> Path:
-    """NASパス（\\host\share\...）をDockerローカルパスに変換する"""
+    """NASパス(UNCパス)をDockerローカルパスに変換する"""
     # バックスラッシュをスラッシュに統一
     normalized = nas_path.replace("\\", "/").lstrip("/")
     # //host/share/... の場合、host/share部分を除去してベースに結合
