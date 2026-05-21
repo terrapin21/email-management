@@ -383,9 +383,9 @@ export default function ExtractionConfigs() {
                         <span className="text-xs text-gray-400 whitespace-nowrap">別名:</span>
                         <input
                           type="text"
-                          value={(f.aliases || []).join(', ')}
-                          onChange={e => updateField(idx, 'aliases', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                          placeholder="施主コード, 現場コード, コード番号（カンマ区切り）"
+                          value={(f.aliases || []).join('、')}
+                          onChange={e => updateField(idx, 'aliases', e.target.value.split(/[,、]/).map(s => s.trim()).filter(Boolean))}
+                          placeholder="施主コード、現場コード、コード番号（読点区切り）"
                           className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-xs text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
                         />
                       </div>
