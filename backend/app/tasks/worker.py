@@ -138,7 +138,9 @@ def _save_attachments(db: Session, email_obj: models.Email, attachments: list):
             db.flush()  # IDを確定させてからキャッシュ保存
             if data:
                 _ATT_CACHE.mkdir(parents=True, exist_ok=True)
-                (_ATT_CACHE / f"{att_obj.id}.bin").write_bytes(data)
+                cache_path = _ATT_CACHE / f"{att_obj.id}.bin"
+                cache_path.write_bytes(data)
+                att_obj.file_path = str(cache_path)
         except Exception as e:
             logger.error(f"添付メタデータ保存エラー (email_id={email_obj.id}): {e}")
     db.commit()

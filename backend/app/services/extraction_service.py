@@ -26,6 +26,17 @@ from app.services.archive_service import (
 logger = logging.getLogger(__name__)
 
 ATTACHMENT_BASE = Path("/app/attachments")
+ATT_CACHE = ATTACHMENT_BASE / "cache"
+
+
+def _resolve_att_path(att) -> str | None:
+    """添付ファイルの実ファイルパスを返す。file_pathが未設定ならキャッシュパスを試みる。"""
+    if att.file_path and os.path.exists(att.file_path):
+        return att.file_path
+    cache = ATT_CACHE / f"{att.id}.bin"
+    if cache.exists():
+        return str(cache)
+    return None
 
 MAP_KEYWORDS = ["地図", "案内図", "付近地図", "map", "邸案内図", "周辺図", "ちず", "annai"]
 REQUEST_KEYWORDS = ["回収依頼", "養生回収", "養生材回収", "依頼票", "依頼書", "床養生", "リユース"]
@@ -317,32 +328,37 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
 
     if attachments:
         map_atts = [a for a in attachments if is_map_file(a.filename)]
-        req_atts = [a for a in attachments if not is_map_file(a.filename) and a.file_path]
+        req_atts = [a for a in attachments if not is_map_file(a.filename)]
 
+        processed_any = False
         for req_att in req_atts:
-            if not os.path.exists(req_att.file_path or ""):
+            fpath = _resolve_att_path(req_att)
+            if not fpath:
+                logger.warning(f"添付ファイルが見つかりません: id={req_att.id} filename={req_att.filename}")
                 continue
 
             kind = get_file_kind(req_att.filename)
 
             if kind in ("excel", "pdf"):
                 attachment_pattern = "case1"
+                processed_any = True
                 if kind == "excel":
-                    content = extract_text_from_excel(req_att.file_path)
+                    content = extract_text_from_excel(fpath)
                 else:
-                    content = extract_text_from_pdf(req_att.file_path)
+                    content = extract_text_from_pdf(fpath)
 
                 if content:
                     extracted_data = extract_fields_from_text(content, config)
                     status = "completed" if extracted_data else "needs_review"
                     if not extracted_data:
-                        review_reason = "AI が情報を抽出できませんでした"
+                        review_reason = "AIが情報を抽出できませんでした"
                 else:
                     review_reason = "ドキュメントからテキストを取得できませんでした"
 
             elif kind == "image":
                 attachment_pattern = "case2"
-                extracted_data, confident = extract_from_image_with_confidence(req_att.file_path, config)
+                processed_any = True
+                extracted_data, confident = extract_from_image_with_confidence(fpath, config)
                 if confident:
                     status = "completed"
                 else:
@@ -351,12 +367,13 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
 
             elif kind == "archive":
                 attachment_pattern = "case3"
+                processed_any = True
                 pw_email = find_password_email(db, email)
                 password = extract_password_from_text(pw_email.body_text or "") if pw_email else None
 
                 if password:
                     try:
-                        with open(req_att.file_path, "rb") as f:
+                        with open(fpath, "rb") as f:
                             archive_data = f.read()
                         with tempfile.TemporaryDirectory() as tmpdir:
                             tmp_path = Path(tmpdir)
@@ -370,18 +387,18 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
 
                             for file_info in files:
                                 fname = file_info["filename"]
-                                fpath = file_info["file_path"]
+                                fpath_inner = file_info["file_path"]
                                 if is_map_file(fname):
-                                    # 一時ファイルを永続パスにコピー
                                     dest = ATTACHMENT_BASE / "extracted" / f"map_{email_id}_{fname}"
                                     import shutil
-                                    shutil.copy2(fpath, dest)
+                                    dest.parent.mkdir(parents=True, exist_ok=True)
+                                    shutil.copy2(fpath_inner, dest)
                                     map_file_paths.append((str(dest), fname))
                                 elif get_file_kind(fname) in ("excel", "pdf"):
                                     if get_file_kind(fname) == "excel":
-                                        content = extract_text_from_excel(fpath)
+                                        content = extract_text_from_excel(fpath_inner)
                                     else:
-                                        content = extract_text_from_pdf(fpath)
+                                        content = extract_text_from_pdf(fpath_inner)
                                     if content and not extracted_data:
                                         extracted_data = extract_fields_from_text(content, config)
                                         if extracted_data:
@@ -398,13 +415,14 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
             if status == "completed":
                 break
 
-        if not req_atts:
-            review_reason = "依頼書類の添付が見つかりませんでした"
+        if not processed_any:
+            review_reason = "依頼書類の添付が見つかりませんでした（ファイルが存在しないか未サポート形式）"
 
         # 添付の地図ファイルを追加
         for map_att in map_atts:
-            if map_att.file_path and os.path.exists(map_att.file_path):
-                map_file_paths.append((map_att.file_path, map_att.filename))
+            map_path = _resolve_att_path(map_att)
+            if map_path:
+                map_file_paths.append((map_path, map_att.filename))
 
     else:
         # パターン2: メール本文から抽出
