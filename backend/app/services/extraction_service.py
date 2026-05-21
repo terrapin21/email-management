@@ -254,20 +254,23 @@ def analyze_file_with_confidence(file_path: str, filename: str, config: models.M
     return merged, confident
 
 
-# ── NAS ファイル操作 ──────────────────────────────────────────────────────────
+# ── ローカルファイル操作（NASはWindowsからrobocopyで同期） ────────────────────
 
-def _get_smb_session():
-    import smbclient
-    host = settings.NAS_HOST
-    username = settings.NAS_USERNAME or "guest"
-    password = settings.NAS_PASSWORD or ""
-    smbclient.register_session(
-        host,
-        username=username,
-        password=password,
-        require_signing=False,
-        connection_timeout=30,
-    )
+LOCAL_OUTPUT_BASE = Path("/app/nas_output")
+
+
+def _nas_to_local(nas_path: str) -> Path:
+    """NASパス（\\host\share\...）をDockerローカルパスに変換する"""
+    # バックスラッシュをスラッシュに統一
+    normalized = nas_path.replace("\\", "/").lstrip("/")
+    # //host/share/... の場合、host/share部分を除去してベースに結合
+    parts = normalized.split("/")
+    if len(parts) >= 2 and "." in parts[0]:
+        # //192.168.x.x/share/path → skip host + share
+        rel = "/".join(parts[2:])
+    else:
+        rel = normalized
+    return LOCAL_OUTPUT_BASE / rel
 
 
 def _safe_filename(value: str) -> str:
@@ -284,15 +287,13 @@ def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
     row_values = [str(data.get(f.field_name) or "") for f in sorted_fields]
 
     try:
-        import smbclient
-        _get_smb_session()
-        path = config.excel_file_path
+        local_path = _nas_to_local(config.excel_file_path)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            with smbclient.open_file(path, mode="rb") as f:
-                wb = load_workbook(io.BytesIO(f.read()))
-                ws = wb.active
-        except Exception:
+        if local_path.exists():
+            wb = load_workbook(io.BytesIO(local_path.read_bytes()))
+            ws = wb.active
+        else:
             wb = Workbook()
             ws = wb.active
             ws.append(headers)
@@ -300,12 +301,9 @@ def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
         ws.append(row_values)
         buf = io.BytesIO()
         wb.save(buf)
-        buf.seek(0)
+        local_path.write_bytes(buf.getvalue())
 
-        with smbclient.open_file(path, mode="wb") as f:
-            f.write(buf.read())
-
-        logger.info(f"Excel 書き込み完了: {path}")
+        logger.info(f"Excel 書き込み完了: {local_path}")
         return True
     except Exception as e:
         logger.error(f"Excel 書き込みエラー: {e}")
@@ -318,21 +316,25 @@ def save_map_to_nas(file_path: str, filename: str, data: dict, config: models.Ma
         return False
 
     date_field = config.map_date_field or "回収日"
-    code = data.get("コード") or data.get("コード（現場）") or "unknown"
+    code_val = None
+    for f in config.fields:
+        if f.field_type == "code" or f.field_name in ("コード",):
+            code_val = data.get(f.field_name)
+            if code_val:
+                break
+    code = code_val or data.get("コード") or "unknown"
     date_val = data.get(date_field) or "unknown"
 
     ext = Path(filename).suffix.lower()
     save_name = f"{_safe_filename(code)}_{_safe_filename(date_val)}{ext}"
-    save_path = config.map_save_path.rstrip("\\") + "\\" + save_name
 
     try:
-        import smbclient
-        _get_smb_session()
-        with open(file_path, "rb") as local_f:
-            file_data = local_f.read()
-        with smbclient.open_file(save_path, mode="wb") as f:
-            f.write(file_data)
-        logger.info(f"地図保存完了: {save_path}")
+        local_dir = _nas_to_local(config.map_save_path)
+        local_dir.mkdir(parents=True, exist_ok=True)
+        dest = local_dir / save_name
+        import shutil
+        shutil.copy2(file_path, dest)
+        logger.info(f"地図保存完了: {dest}")
         return True
     except Exception as e:
         logger.error(f"地図保存エラー: {e}")

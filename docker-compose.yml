@@ -24,6 +24,7 @@ services:
       - ./backend/.env
     volumes:
       - attachments:/app/attachments
+      - /home/pc/nas_output:/app/nas_output
     depends_on:
       db:
         condition: service_healthy
