@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, Edit2, ChevronDown, ChevronUp } from 'lucide-react'
@@ -379,16 +379,10 @@ export default function ExtractionConfigs() {
                           <Trash2 size={14} />
                         </button>
                       </div>
-                      <div className="flex items-center gap-2 pl-5">
-                        <span className="text-xs text-gray-400 whitespace-nowrap">別名:</span>
-                        <input
-                          type="text"
-                          value={(f.aliases || []).join('、')}
-                          onChange={e => updateField(idx, 'aliases', e.target.value.split(/[,、]/).map(s => s.trim()).filter(Boolean))}
-                          placeholder="施主コード、現場コード、コード番号（読点区切り）"
-                          className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-xs text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                        />
-                      </div>
+                      <AliasInput
+                        aliases={f.aliases || []}
+                        onChange={aliases => updateField(idx, 'aliases', aliases)}
+                      />
                     </div>
                   ))}
                 </div>
@@ -410,6 +404,46 @@ export default function ExtractionConfigs() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function AliasInput({ aliases, onChange }: { aliases: string[]; onChange: (v: string[]) => void }) {
+  const [input, setInput] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const add = () => {
+    const v = input.trim()
+    if (v && !aliases.includes(v)) onChange([...aliases, v])
+    setInput('')
+  }
+
+  const remove = (i: number) => onChange(aliases.filter((_, idx) => idx !== i))
+
+  return (
+    <div className="flex items-start gap-2 pl-5">
+      <span className="text-xs text-gray-400 whitespace-nowrap mt-1.5">別名:</span>
+      <div
+        className="flex flex-wrap gap-1 flex-1 bg-white border border-gray-200 rounded px-2 py-1 cursor-text min-h-[28px]"
+        onClick={() => inputRef.current?.focus()}
+      >
+        {aliases.map((a, i) => (
+          <span key={i} className="flex items-center gap-1 bg-indigo-100 text-indigo-700 text-xs rounded px-1.5 py-0.5">
+            {a}
+            <button type="button" onClick={() => remove(i)} className="text-indigo-400 hover:text-indigo-700 leading-none">×</button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
+          onBlur={add}
+          placeholder={aliases.length === 0 ? '別名を入力してEnter' : ''}
+          className="text-xs outline-none flex-1 min-w-[120px] bg-transparent"
+        />
+      </div>
     </div>
   )
 }
