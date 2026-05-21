@@ -65,6 +65,14 @@ def run_email_poll():
                 except Exception as e:
                     db.rollback()
                     logger.error(f"フェーズ3エラー (email_id={email_obj.id}): {e}")
+
+            # フェーズ4: メーカー設定がある場合は自動抽出・Excel書き込み
+            for email_obj, _ in saved_batch:
+                try:
+                    _run_extraction(db, email_obj)
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"フェーズ4エラー (email_id={email_obj.id}): {e}")
     except Exception as e:
         logger.error(f"ポーリングエラー: {e}")
     finally:
@@ -195,6 +203,23 @@ def _run_ai_analysis(db: Session, email_obj: models.Email):
     except Exception as e:
         db.rollback()
         logger.error(f"AI解析エラー (email_id={email_obj.id}): {e}")
+
+
+def _run_extraction(db: Session, email_obj: models.Email):
+    """AIが解析したメーカー名に対応する抽出設定があれば自動抽出する。"""
+    maker = email_obj.ai_manufacturer
+    if not maker:
+        return
+
+    config = db.query(models.MakerExtractionConfig).filter(
+        models.MakerExtractionConfig.maker_name.ilike(f"%{maker}%")
+    ).first()
+    if not config:
+        return
+
+    from app.services.extraction_service import process_email_extraction
+    result = process_email_extraction(email_obj.id, db)
+    logger.info(f"自動抽出: email_id={email_obj.id}, status={result.get('status')}")
 
 
 def _run_forwarding(db: Session, email_obj: models.Email):
