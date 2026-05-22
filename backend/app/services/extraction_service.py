@@ -474,9 +474,14 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
         logger.warning(f"抽出スキップ: email_id={email_id} ai_manufacturerが未設定")
         return {"success": False, "reason": "メーカー情報が未解析です"}
 
-    config = db.query(models.MakerExtractionConfig).filter(
-        models.MakerExtractionConfig.maker_name.ilike(f"%{maker}%")
-    ).first()
+    # 設定名がAI名に含まれる、またはAI名が設定名に含まれる、どちらでも一致とみなす
+    maker_lower = maker.lower()
+    all_configs = db.query(models.MakerExtractionConfig).all()
+    config = next(
+        (c for c in all_configs
+         if c.maker_name.lower() in maker_lower or maker_lower in c.maker_name.lower()),
+        None,
+    )
     if not config:
         logger.warning(f"抽出スキップ: email_id={email_id} メーカー「{maker}」の設定なし")
         return {"success": False, "reason": f"メーカー「{maker}」の抽出設定がありません"}

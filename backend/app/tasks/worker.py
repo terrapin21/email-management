@@ -213,9 +213,13 @@ def _run_extraction(db: Session, email_obj: models.Email):
     if not maker:
         return
 
-    config = db.query(models.MakerExtractionConfig).filter(
-        models.MakerExtractionConfig.maker_name.ilike(f"%{maker}%")
-    ).first()
+    maker_lower = maker.lower()
+    all_configs = db.query(models.MakerExtractionConfig).all()
+    config = next(
+        (c for c in all_configs
+         if c.maker_name.lower() in maker_lower or maker_lower in c.maker_name.lower()),
+        None,
+    )
     if not config:
         return
 
