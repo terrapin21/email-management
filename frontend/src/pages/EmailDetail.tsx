@@ -150,8 +150,9 @@ export default function EmailDetailPage() {
     mutationFn: ({ resultId, date }: { resultId: number; date: string }) => setSoonestDate(resultId, date),
     onSuccess: () => {
       toast.success('最短日を設定してExcelに書き込みました')
-      qc.refetchQueries({ queryKey: ['extractionResults', emailId] })
-      qc.refetchQueries({ queryKey: ['email', emailId] })
+      qc.invalidateQueries({ queryKey: ['extraction-results', emailId] })
+      qc.invalidateQueries({ queryKey: ['email', emailId] })
+      qc.invalidateQueries({ queryKey: ['emails'] })
     },
     onError: () => toast.error('書き込みに失敗しました'),
   })

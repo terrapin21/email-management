@@ -156,6 +156,7 @@ def _build_extraction_prompt(config: models.MakerExtractionConfig) -> str:
 書類の内容を解析して、抽出項目の値をJSONのみで返してください。
 別の呼び方が記載されていても同じ項目として扱い、JSONのキーは必ず左側の名前を使用してください。
 見つからない場合は null を使用。日付は YYYY-MM-DD 形式。
+【重要】日付フィールドに具体的な日付がなく、「最短」「最速」「最短日」「できるだけ早く」などの表現がある場合は、そのフィールドの値を「最短」と設定してください。
 例: {example}
 JSON以外は絶対に出力しないでください。"""
 
@@ -284,10 +285,12 @@ def _has_soonest_keyword(text: str) -> bool:
 
 
 def _find_empty_date_field(extracted_data: dict, config: models.MakerExtractionConfig) -> str | None:
-    """値が空の日付フィールド名を返す"""
+    """値が空または「最短」の日付フィールド名を返す"""
     for field in sorted(config.fields, key=lambda f: f.order):
-        if field.field_type == "date" and not extracted_data.get(field.field_name):
-            return field.field_name
+        if field.field_type == "date":
+            val = extracted_data.get(field.field_name)
+            if not val or _has_soonest_keyword(str(val)):
+                return field.field_name
     return None
 
 
@@ -401,10 +404,29 @@ def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
         local_path.write_bytes(buf.getvalue())
 
         logger.info(f"Excel 書き込み完了: {local_path}")
+
+        # エクセルと同じディレクトリにトリガーファイルを書く（PAD連携用）
+        # robocopyがエクセルと一緒にNASへ同期する
+        _write_pad_trigger(local_path.parent)
+
         return True
     except Exception as e:
         logger.error(f"Excel 書き込みエラー: {e}")
         return False
+
+
+def _write_pad_trigger(directory: Path) -> None:
+    """PAD連携用トリガーファイルをエクセルと同じディレクトリに書く"""
+    import datetime
+    trigger_path = directory / "_pad_trigger.txt"
+    try:
+        trigger_path.write_text(
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            encoding="utf-8",
+        )
+        logger.info(f"PADトリガー書き込み: {trigger_path}")
+    except Exception as e:
+        logger.warning(f"PADトリガー書き込み失敗: {e}")
 
 
 def save_map_to_nas(file_path: str, filename: str, data: dict, config: models.MakerExtractionConfig) -> bool:
@@ -598,16 +620,23 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
         status = "needs_review"
         review_reason = "地図ファイルが見つかりませんでした（必須設定）"
 
-    # 最短キーワードチェック：本文または抽出値に「最短」があり日付フィールドが空なら手動入力待ち
+    # 最短キーワードチェック：本文・抽出値・日付フィールドに「最短」があれば手動入力待ち
     needs_soonest_date = False
     soonest_date_field = None
     body_text = email.body_text or ""
     extracted_values_text = " ".join(str(v) for v in extracted_data.values() if v)
-    if _has_soonest_keyword(body_text) or _has_soonest_keyword(extracted_values_text):
+    has_soonest = (
+        _has_soonest_keyword(body_text)
+        or _has_soonest_keyword(extracted_values_text)
+    )
+    if has_soonest:
         soonest_date_field = _find_empty_date_field(extracted_data, config)
         if soonest_date_field:
             needs_soonest_date = True
             status = "needs_review"
+            # 「最短」が日付フィールドの値として入っている場合はクリアしてから手動入力待ちにする
+            if _has_soonest_keyword(str(extracted_data.get(soonest_date_field) or "")):
+                extracted_data[soonest_date_field] = None
             review_reason = f"「最短」指定のため {soonest_date_field} を手動入力してください"
 
     # Excel書き込みと地図保存（最短入力待ちの場合は書き込みをスキップ）
