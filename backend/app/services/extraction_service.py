@@ -336,14 +336,14 @@ def _normalize_date_value(value: str) -> tuple[str, bool]:
         # 年あり: そのまま検証
         d = _try_date(year, month, day)
         if d:
-            return f"{d.year}-{d.month}-{d.day}", d >= today
+            return f"{d.year}-{d.month:02d}-{d.day:02d}", d >= today
         return s, False
     else:
         # 年なし: 今年→来年の順で試す
         for y in (today.year, today.year + 1):
             d = _try_date(y, month, day)
             if d and d >= today:
-                return f"{d.year}-{d.month}-{d.day}", True
+                return f"{d.year}-{d.month:02d}-{d.day:02d}", True
         return s, False
 
 
@@ -455,6 +455,14 @@ def _safe_filename(value: str) -> str:
     return re.sub(r'[\\/:*?"<>|\s]', "_", str(value or "unknown"))
 
 
+def _format_date_for_excel(value: str) -> str:
+    """内部形式 YYYY-MM-DD → Excelに書き込む yyyy/m/d 形式"""
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', str(value))
+    if m:
+        return f"{m.group(1)}/{int(m.group(2))}/{int(m.group(3))}"
+    return value
+
+
 def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
     if not config.excel_file_path:
         logger.warning("Excel パスが未設定")
@@ -462,7 +470,11 @@ def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
 
     sorted_fields = sorted(config.fields, key=lambda f: f.order)
     headers = [f.field_name for f in sorted_fields] + ["処理済"]
-    row_values = [str(data.get(f.field_name) or "") for f in sorted_fields] + [""]
+    row_values = [
+        _format_date_for_excel(str(data.get(f.field_name) or "")) if f.field_type == "date"
+        else str(data.get(f.field_name) or "")
+        for f in sorted_fields
+    ] + [""]
 
     try:
         local_path = _nas_to_local(config.excel_file_path)
