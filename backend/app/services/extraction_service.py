@@ -523,45 +523,71 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
             elif kind == "archive":
                 attachment_pattern = "case3"
                 processed_any = True
-                pw_email = find_password_email(db, email)
-                password = extract_password_from_text(pw_email.body_text or "") if pw_email else None
 
-                if password:
-                    try:
-                        with open(fpath, "rb") as f:
-                            archive_data = f.read()
-                        with tempfile.TemporaryDirectory() as tmpdir:
-                            tmp_path = Path(tmpdir)
-                            lower = req_att.filename.lower()
-                            if lower.endswith(".zip"):
-                                files = _extract_zip(archive_data, password, tmp_path)
-                            elif lower.endswith(".7z"):
-                                files = _extract_7z(archive_data, password, tmp_path)
+                # 解凍済みアーカイブレコードがあればそのファイルを直接使う
+                arch_record = next(
+                    (a for a in (email.encrypted_archives or [])
+                     if a.attachment_id == req_att.id
+                     and a.status == models.ArchiveStatusEnum.extracted),
+                    None,
+                )
+                if arch_record and arch_record.extracted_files:
+                    logger.info(f"解凍済みアーカイブから抽出: archive_id={arch_record.id}, "
+                                f"files={[ef.filename for ef in arch_record.extracted_files]}")
+                    for ef in arch_record.extracted_files:
+                        if not os.path.exists(ef.file_path):
+                            logger.warning(f"解凍済みファイルが見つかりません: {ef.file_path}")
+                            continue
+                        if is_map_file(ef.filename):
+                            map_file_paths.append((ef.file_path, ef.filename))
+                        elif get_file_kind(ef.filename) in ("excel", "pdf", "image"):
+                            data, confident = analyze_file_with_confidence(ef.file_path, ef.filename, config)
+                            if data:
+                                extracted_data = data
+                                status = "completed" if confident else "needs_review"
+                                if not confident:
+                                    review_reason = "解析結果の信頼度が不足しています（必須項目が取得できませんでした）"
                             else:
-                                files = []
-
-                            for file_info in files:
-                                fname = file_info["filename"]
-                                fpath_inner = file_info["file_path"]
-                                if is_map_file(fname):
-                                    dest = ATTACHMENT_BASE / "extracted" / f"map_{email_id}_{fname}"
-                                    import shutil
-                                    dest.parent.mkdir(parents=True, exist_ok=True)
-                                    shutil.copy2(fpath_inner, dest)
-                                    map_file_paths.append((str(dest), fname))
-                                elif get_file_kind(fname) in ("excel", "pdf"):
-                                    if get_file_kind(fname) == "excel":
-                                        content = extract_text_from_excel(fpath_inner)
-                                    else:
-                                        content = extract_text_from_pdf(fpath_inner)
-                                    if content and not extracted_data:
-                                        extracted_data = extract_fields_from_text(content, config)
-                                        if extracted_data:
-                                            status = "completed"
-                    except Exception as e:
-                        review_reason = f"圧縮ファイルの解凍に失敗しました: {e}"
+                                review_reason = "AIが解凍済みファイルから情報を抽出できませんでした"
                 else:
-                    review_reason = "パスワードメールが見つかりません（PPAP対応待ち）"
+                    # 未解凍: パスワードメールを探して解凍を試みる
+                    pw_email = find_password_email(db, email)
+                    password = extract_password_from_text(pw_email.body_text or "") if pw_email else None
+
+                    if password:
+                        try:
+                            with open(fpath, "rb") as f:
+                                archive_data = f.read()
+                            with tempfile.TemporaryDirectory() as tmpdir:
+                                tmp_path = Path(tmpdir)
+                                lower = req_att.filename.lower()
+                                if lower.endswith(".zip"):
+                                    files = _extract_zip(archive_data, password, tmp_path)
+                                elif lower.endswith(".7z"):
+                                    files = _extract_7z(archive_data, password, tmp_path)
+                                else:
+                                    files = []
+
+                                for file_info in files:
+                                    fname = file_info["filename"]
+                                    fpath_inner = file_info["file_path"]
+                                    if is_map_file(fname):
+                                        import shutil
+                                        dest = ATTACHMENT_BASE / "extracted" / f"map_{email_id}_{fname}"
+                                        dest.parent.mkdir(parents=True, exist_ok=True)
+                                        shutil.copy2(fpath_inner, dest)
+                                        map_file_paths.append((str(dest), fname))
+                                    elif get_file_kind(fname) in ("excel", "pdf", "image"):
+                                        data, confident = analyze_file_with_confidence(fpath_inner, fname, config)
+                                        if data and not extracted_data:
+                                            extracted_data = data
+                                            status = "completed" if confident else "needs_review"
+                                            if not confident:
+                                                review_reason = "解析結果の信頼度が不足しています"
+                        except Exception as e:
+                            review_reason = f"圧縮ファイルの解凍に失敗しました: {e}"
+                    else:
+                        review_reason = "パスワードメールが見つかりません（PPAP対応待ち）"
 
             else:
                 attachment_pattern = "case4"
