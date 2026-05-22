@@ -299,6 +299,24 @@ def _is_site_id_field(field_name: str) -> bool:
     return any(k in n for k in _SITE_ID_KEYWORDS)
 
 
+def _collect_map_files(
+    email: models.Email,
+    extracted_data: dict,
+    config: models.MakerExtractionConfig,
+    db: Session,
+) -> list[tuple[str, str]]:
+    """メール本体・関連メール双方から地図ファイルを収集して返す"""
+    map_files: list[tuple[str, str]] = []
+    for att in (email.attachments or []):
+        if is_map_file(att.filename):
+            fpath = _resolve_att_path(att)
+            if fpath:
+                map_files.append((fpath, att.filename))
+    if not map_files:
+        map_files = _find_map_from_related_emails(email, extracted_data, config, db)
+    return map_files
+
+
 def _find_map_from_related_emails(
     email: models.Email,
     extracted_data: dict,
@@ -629,15 +647,8 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
         if not processed_any:
             review_reason = "依頼書類の添付が見つかりませんでした（ファイルが存在しないか未サポート形式）"
 
-        # 添付の地図ファイルを追加
-        for map_att in map_atts:
-            map_path = _resolve_att_path(map_att)
-            if map_path:
-                map_file_paths.append((map_path, map_att.filename))
-
-        # 地図が見つからない場合は関連メールから探す
-        if not map_file_paths:
-            map_file_paths = _find_map_from_related_emails(email, extracted_data, config, db)
+        # 地図ファイルを収集（本体添付 → 関連メールの順に探す）
+        map_file_paths = _collect_map_files(email, extracted_data, config, db)
 
         # 添付解析後にメール本文でも抽出して不足フィールドを補完
         if email.body_text:
@@ -667,9 +678,9 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
         else:
             review_reason = "メール本文が空です"
 
-        # 関連メールから地図を探す
-        if not map_file_paths and extracted_data:
-            map_file_paths = _find_map_from_related_emails(email, extracted_data, config, db)
+        # 地図ファイルを収集（本体添付 → 関連メールの順に探す）
+        if extracted_data:
+            map_file_paths = _collect_map_files(email, extracted_data, config, db)
 
     # 地図必須チェック
     if config.map_required and not map_file_paths and status == "completed":

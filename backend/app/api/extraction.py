@@ -167,7 +167,7 @@ def set_soonest_date(
     current_user: models.User = Depends(require_admin),
 ):
     """最短日を手動入力してExcelに書き込む（管理者のみ）"""
-    from app.services.extraction_service import write_excel_row, save_map_to_nas
+    from app.services.extraction_service import write_excel_row, save_maps_to_nas, _collect_map_files
     result = db.query(models.ExtractionResult).filter(
         models.ExtractionResult.id == result_id
     ).first()
@@ -195,6 +195,10 @@ def set_soonest_date(
         if email.status_record and email.status_record.status == models.EmailStatusEnum.needs_review:
             email.status_record.status = models.EmailStatusEnum.read
         db.commit()
+        # Excel書き込み後に地図PDFも保存
+        map_files = _collect_map_files(email, data, config, db)
+        if map_files:
+            save_maps_to_nas(map_files, data, config)
         return {"ok": True}
     db.commit()
     raise HTTPException(status_code=500, detail="Excel書き込みに失敗しました")
@@ -207,7 +211,7 @@ def confirm_result(
     current_user: models.User = Depends(get_current_user),
 ):
     """要確認の結果を手動で確認済みにしてExcelに書き込む"""
-    from app.services.extraction_service import write_excel_row, save_map_to_nas
+    from app.services.extraction_service import write_excel_row, save_maps_to_nas, _collect_map_files
     result = db.query(models.ExtractionResult).filter(
         models.ExtractionResult.id == result_id
     ).first()
@@ -215,7 +219,8 @@ def confirm_result(
         raise HTTPException(status_code=404, detail="結果が見つかりません")
 
     config = result.config
-    ok = write_excel_row(result.extracted_data, config)
+    data = result.extracted_data or {}
+    ok = write_excel_row(data, config)
     if ok:
         result.status = "completed"
         result.excel_written = True
@@ -223,5 +228,9 @@ def confirm_result(
         if email.status_record and email.status_record.status == models.EmailStatusEnum.needs_review:
             email.status_record.status = models.EmailStatusEnum.read
         db.commit()
+        # Excel書き込み後に地図PDFも保存
+        map_files = _collect_map_files(email, data, config, db)
+        if map_files:
+            save_maps_to_nas(map_files, data, config)
         return {"ok": True}
     raise HTTPException(status_code=500, detail="Excel書き込みに失敗しました")
