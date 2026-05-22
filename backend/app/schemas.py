@@ -307,6 +307,7 @@ class EmailListItem(BaseModel):
     has_attachments: bool = False
     registration_status: Optional[str] = None   # "registered" | "not_registered" | None
     reflection_status: Optional[str] = None     # "reflected" | "not_reflected" | None
+    needs_soonest_date: bool = False
 
     class Config:
         from_attributes = True
@@ -509,6 +510,8 @@ class ExtractionResultOut(BaseModel):
     review_reason: Optional[str]
     attachment_pattern: Optional[str]
     excel_written: bool
+    needs_soonest_date: bool = False
+    soonest_date_field: Optional[str] = None
     created_at: datetime
 
     class Config:

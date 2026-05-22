@@ -66,6 +66,7 @@ def list_emails(
     registration_map: dict = {}  # email_id -> "registered"
     reflection_map: dict = {}    # email_id -> "reflected" | "not_reflected" | None
     has_attachment_ids: set = set()
+    soonest_ids: set = set()
 
     if email_ids:
         forwarded_ids = {
@@ -106,6 +107,16 @@ def list_emails(
             .distinct().all()
         }
 
+        soonest_ids = {
+            row[0] for row in
+            db.query(models.ExtractionResult.email_id)
+            .filter(
+                models.ExtractionResult.email_id.in_(email_ids),
+                models.ExtractionResult.needs_soonest_date == True,
+            )
+            .distinct().all()
+        }
+
     items = []
     for e in emails:
         labels = [el.label for el in e.email_labels if el.label and el.label.is_active]
@@ -120,6 +131,7 @@ def list_emails(
         items.append(EmailListItem(
             is_forwarded=e.id in forwarded_ids,
             has_attachments=e.id in has_attachment_ids,
+            needs_soonest_date=e.id in soonest_ids,
             id=e.id,
             account_id=e.account_id,
             subject=e.subject,

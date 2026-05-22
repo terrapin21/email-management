@@ -153,6 +153,47 @@ def get_results(
     ).order_by(models.ExtractionResult.created_at.desc()).all()
 
 
+@router.put("/results/{result_id}/soonest-date")
+def set_soonest_date(
+    result_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    """最短日を手動入力してExcelに書き込む（管理者のみ）"""
+    from app.services.extraction_service import write_excel_row, save_map_to_nas
+    result = db.query(models.ExtractionResult).filter(
+        models.ExtractionResult.id == result_id
+    ).first()
+    if not result:
+        raise HTTPException(status_code=404, detail="結果が見つかりません")
+    if not result.needs_soonest_date or not result.soonest_date_field:
+        raise HTTPException(status_code=400, detail="最短日入力待ち状態ではありません")
+
+    date_value = payload.get("date")
+    if not date_value:
+        raise HTTPException(status_code=422, detail="date フィールドが必要です")
+
+    data = dict(result.extracted_data or {})
+    data[result.soonest_date_field] = date_value
+    result.extracted_data = data
+    result.needs_soonest_date = False
+    result.soonest_date_field = None
+
+    config = result.config
+    ok = write_excel_row(data, config)
+    if ok:
+        result.status = "completed"
+        result.excel_written = True
+        email = result.email
+        if email.status_record and email.status_record.status == models.EmailStatusEnum.needs_review:
+            email.status_record.status = models.EmailStatusEnum.read
+        db.commit()
+        return {"ok": True}
+    db.commit()
+    raise HTTPException(status_code=500, detail="Excel書き込みに失敗しました")
+
+
 @router.put("/results/{result_id}/confirm")
 def confirm_result(
     result_id: int,

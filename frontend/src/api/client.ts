@@ -66,6 +66,7 @@ export const deleteExtractionConfig = (id: number) => api.delete(`/extraction/co
 export const processExtraction = (emailId: number) => api.post(`/extraction/process/${emailId}`)
 export const getExtractionResults = (emailId: number) => api.get(`/extraction/results/${emailId}`)
 export const confirmExtractionResult = (resultId: number) => api.put(`/extraction/results/${resultId}/confirm`)
+export const setSoonestDate = (resultId: number, date: string) => api.put(`/extraction/results/${resultId}/soonest-date`, { date })
 
 // Emails
 export const getEmails = (params: object) => api.get('/emails', { params })

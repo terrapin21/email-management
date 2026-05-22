@@ -261,6 +261,9 @@ export default function EmailList() {
                       {email.reflection_status === 'not_reflected' && (
                         <span className="inline-block mt-0.5 ml-1 text-xs bg-red-100 text-red-700 rounded-full px-2 py-0.5">未反映</span>
                       )}
+                      {email.needs_soonest_date && (
+                        <span className="inline-block mt-0.5 text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5 font-medium">最短入力</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell text-xs text-gray-500 whitespace-nowrap">
                       {email.received_at && format(new Date(email.received_at), 'MM/dd HH:mm', { locale: ja })}

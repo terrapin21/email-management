@@ -6,7 +6,7 @@ import {
   reanalyzeEmail, refetchEmailBody, getLabels, getEmailActivities, getUsers,
   downloadAttachment, prefetchAttachments, forwardEmail, getReplyTemplates, sendReply, getReplyLogs,
   getRelatedEmails, getEmailArchives, retryArchiveExtraction, downloadExtractedFile,
-  processExtraction, getExtractionResults, confirmExtractionResult,
+  processExtraction, getExtractionResults, confirmExtractionResult, setSoonestDate,
 } from '../api/client'
 import { EmailDetail as IEmailDetail, Label, User, ReplyTemplate, ReplyLog, RelatedEmail, EncryptedArchive } from '../types'
 import StatusBadge from '../components/StatusBadge'
@@ -134,6 +134,8 @@ export default function EmailDetailPage() {
     onError: (e: any) => toast.error(e.response?.data?.detail || '抽出処理に失敗しました'),
   })
 
+  const [soonestDates, setSoonestDates] = useState<Record<number, string>>({})
+
   const confirmExtractionMut = useMutation({
     mutationFn: (resultId: number) => confirmExtractionResult(resultId),
     onSuccess: () => {
@@ -142,6 +144,16 @@ export default function EmailDetailPage() {
       qc.invalidateQueries({ queryKey: ['email', emailId] })
     },
     onError: () => toast.error('Excel 書き込みに失敗しました'),
+  })
+
+  const soonestDateMut = useMutation({
+    mutationFn: ({ resultId, date }: { resultId: number; date: string }) => setSoonestDate(resultId, date),
+    onSuccess: () => {
+      toast.success('最短日を設定してExcelに書き込みました')
+      qc.refetchQueries({ queryKey: ['extractionResults', emailId] })
+      qc.refetchQueries({ queryKey: ['email', emailId] })
+    },
+    onError: () => toast.error('書き込みに失敗しました'),
   })
 
   const refetchMut = useMutation({
@@ -614,10 +626,10 @@ export default function EmailDetailPage() {
             ) : (
               <div className="space-y-3">
                 {extractionResults.map((r: any) => (
-                  <div key={r.id} className={`rounded-lg border p-3 ${r.status === 'completed' ? 'border-green-200 bg-green-50' : r.status === 'needs_review' ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
+                  <div key={r.id} className={`rounded-lg border p-3 ${r.status === 'completed' ? 'border-green-200 bg-green-50' : r.needs_soonest_date ? 'border-orange-200 bg-orange-50' : r.status === 'needs_review' ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
                     <div className="flex items-center justify-between mb-2">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${r.status === 'completed' ? 'bg-green-100 text-green-700' : r.status === 'needs_review' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {r.status === 'completed' ? '完了' : r.status === 'needs_review' ? '要確認' : r.status}
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${r.status === 'completed' ? 'bg-green-100 text-green-700' : r.needs_soonest_date ? 'bg-orange-100 text-orange-700' : r.status === 'needs_review' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {r.status === 'completed' ? '完了' : r.needs_soonest_date ? '最短入力待ち' : r.status === 'needs_review' ? '要確認' : r.status}
                       </span>
                       <span className="text-xs text-gray-400">{r.attachment_pattern}</span>
                     </div>
@@ -627,16 +639,37 @@ export default function EmailDetailPage() {
                     {Object.keys(r.extracted_data || {}).length > 0 && (
                       <div className="grid grid-cols-2 gap-1.5 mb-2">
                         {Object.entries(r.extracted_data).map(([k, v]) => (
-                          <div key={k} className="bg-white rounded p-1.5 border border-gray-100">
-                            <div className="text-xs text-gray-400">{k}</div>
+                          <div key={k} className={`bg-white rounded p-1.5 border ${r.needs_soonest_date && k === r.soonest_date_field ? 'border-orange-300' : 'border-gray-100'}`}>
+                            <div className="text-xs text-gray-400">{k}{r.needs_soonest_date && k === r.soonest_date_field && <span className="ml-1 text-orange-500">※最短日</span>}</div>
                             <div className="text-sm font-medium text-gray-900">{String(v ?? '―')}</div>
                           </div>
                         ))}
                       </div>
                     )}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {r.excel_written ? (
                         <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle size={11} /> Excel書き込み済み</span>
+                      ) : r.needs_soonest_date ? (
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-orange-700 font-medium">{r.soonest_date_field}（最短日）:</div>
+                          <input
+                            type="date"
+                            value={soonestDates[r.id] || ''}
+                            onChange={e => setSoonestDates(prev => ({ ...prev, [r.id]: e.target.value }))}
+                            className="text-xs border border-orange-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-orange-400"
+                          />
+                          <button
+                            onClick={() => {
+                              const d = soonestDates[r.id]
+                              if (!d) { toast.error('日付を選択してください'); return }
+                              soonestDateMut.mutate({ resultId: r.id, date: d })
+                            }}
+                            disabled={soonestDateMut.isPending}
+                            className="text-xs bg-orange-600 text-white rounded px-2 py-1 hover:bg-orange-700 disabled:opacity-50"
+                          >
+                            Excel書き込み
+                          </button>
+                        </div>
                       ) : r.status === 'needs_review' ? (
                         <button
                           onClick={() => confirmExtractionMut.mutate(r.id)}

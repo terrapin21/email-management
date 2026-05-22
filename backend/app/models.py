@@ -357,6 +357,8 @@ class ExtractionResult(Base):
     review_reason = Column(Text)
     attachment_pattern = Column(String(20))  # case1/case2/case3/case4/pattern2
     excel_written = Column(Boolean, default=False)
+    needs_soonest_date = Column(Boolean, default=False)
+    soonest_date_field = Column(String(100))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     email = relationship("Email", back_populates="extraction_results")
