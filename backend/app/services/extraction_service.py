@@ -159,6 +159,23 @@ def _build_extraction_prompt(config: models.MakerExtractionConfig) -> str:
 JSON以外は絶対に出力しないでください。"""
 
 
+def _extract_from_body(body_text: str, config: models.MakerExtractionConfig) -> dict:
+    """メール本文からフィールドを抽出する"""
+    ai = _get_ai_client()
+    system = _build_extraction_prompt(config)
+    try:
+        resp = ai.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            system=system,
+            messages=[{"role": "user", "content": f"以下のメール本文から情報を抽出してください:\n\n{body_text[:5000]}"}],
+        )
+        return _parse_ai_response(resp.content[0].text)
+    except Exception as e:
+        logger.warning(f"本文抽出エラー: {e}")
+        return {}
+
+
 def _parse_ai_response(text: str) -> dict:
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if m:
@@ -527,34 +544,35 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
         if not map_file_paths:
             map_file_paths = _find_map_from_related_emails(email, extracted_data, config, db)
 
+        # 添付解析後にメール本文でも抽出して不足フィールドを補完
+        if email.body_text:
+            body_data = _extract_from_body(email.body_text, config)
+            for k, v in body_data.items():
+                if v and not extracted_data.get(k):
+                    extracted_data[k] = v
+            # 補完後に必須フィールドが揃えば completed に昇格
+            required_names = [f.field_name for f in config.fields if f.required]
+            if status != "completed" and extracted_data and all(extracted_data.get(n) for n in required_names):
+                status = "completed"
+                review_reason = ""
+
     else:
-        # パターン2: メール本文から抽出
+        # 添付なし: メール本文のみから抽出
         attachment_pattern = "pattern2"
         if email.body_text:
-            ai = _get_ai_client()
-            system = _build_extraction_prompt(config)
-            try:
-                resp = ai.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=800,
-                    system=system,
-                    messages=[{"role": "user", "content": f"以下のメール本文から情報を抽出してください:\n\n{email.body_text[:5000]}"}],
-                )
-                extracted_data = _parse_ai_response(resp.content[0].text)
-                required = [f.field_name for f in config.fields if f.required]
-                if extracted_data and all(extracted_data.get(f) for f in required):
-                    status = "completed"
-                elif extracted_data:
-                    status = "needs_review"
-                    review_reason = "必須項目の一部が取得できませんでした"
-                else:
-                    review_reason = "本文から情報を抽出できませんでした"
-            except Exception as e:
-                review_reason = f"本文解析エラー: {e}"
+            extracted_data = _extract_from_body(email.body_text, config)
+            required_names = [f.field_name for f in config.fields if f.required]
+            if extracted_data and all(extracted_data.get(n) for n in required_names):
+                status = "completed"
+            elif extracted_data:
+                status = "needs_review"
+                review_reason = "必須項目の一部が取得できませんでした"
+            else:
+                review_reason = "本文から情報を抽出できませんでした"
         else:
             review_reason = "メール本文が空です"
 
-        # 本文抽出パターンでも関連メールから地図を探す
+        # 関連メールから地図を探す
         if not map_file_paths and extracted_data:
             map_file_paths = _find_map_from_related_emails(email, extracted_data, config, db)
 
