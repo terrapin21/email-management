@@ -439,16 +439,91 @@ def _find_map_from_related_emails(
 
 def _nas_to_local(nas_path: str) -> Path:
     """NASパス(UNCパス)をDockerローカルパスに変換する"""
-    # バックスラッシュをスラッシュに統一
     normalized = nas_path.replace("\\", "/").lstrip("/")
-    # //host/share/... の場合、host/share部分を除去してベースに結合
     parts = normalized.split("/")
     if len(parts) >= 2 and "." in parts[0]:
-        # //192.168.x.x/share/path → skip host + share
         rel = "/".join(parts[2:])
     else:
         rel = normalized
     return LOCAL_OUTPUT_BASE / rel
+
+
+def _parse_nas_path(nas_path: str) -> tuple[str, str, str]:
+    """\\host\share\path → (host, share, /path)"""
+    normalized = nas_path.replace("\\", "/").lstrip("/")
+    parts = normalized.split("/")
+    if len(parts) >= 2 and "." in parts[0]:
+        host = parts[0]
+        share = parts[1]
+        path = "/" + "/".join(parts[2:]) if len(parts) > 2 else "/"
+        return host, share, path
+    return "", "", "/" + normalized
+
+
+def _smb_connect():
+    from smb.SMBConnection import SMBConnection
+    from app.config import settings as _s
+    conn = SMBConnection(
+        _s.NAS_USERNAME, _s.NAS_PASSWORD,
+        "emailsys", _s.NAS_HOST,
+        use_ntlm_v2=True, is_direct_tcp=True,
+    )
+    if not conn.connect(_s.NAS_HOST, 445):
+        # port 445失敗時はport 139(NetBIOS)で再試行
+        conn2 = SMBConnection(
+            _s.NAS_USERNAME, _s.NAS_PASSWORD,
+            "emailsys", _s.NAS_HOST,
+            use_ntlm_v2=True, is_direct_tcp=False,
+        )
+        if not conn2.connect(_s.NAS_HOST, 139):
+            raise ConnectionError("NAS接続失敗")
+        return conn2
+    return conn
+
+
+def _smb_makedirs(conn, share: str, dir_path: str):
+    parts = dir_path.strip("/").split("/")
+    current = ""
+    for part in parts:
+        current = current + "/" + part
+        try:
+            conn.createDirectory(share, current)
+        except Exception:
+            pass
+
+
+def _smb_write(nas_path: str, data: bytes) -> bool:
+    from app.config import settings as _s
+    if not _s.NAS_USERNAME:
+        return False
+    try:
+        host, share, path = _parse_nas_path(nas_path)
+        conn = _smb_connect()
+        dir_path = path.rsplit("/", 1)[0]
+        if dir_path and dir_path != "/":
+            _smb_makedirs(conn, share, dir_path)
+        conn.storeFile(share, path, io.BytesIO(data))
+        conn.close()
+        logger.info(f"SMB書き込み完了: {path}")
+        return True
+    except Exception as e:
+        logger.error(f"SMB書き込みエラー ({nas_path}): {e}")
+        return False
+
+
+def _smb_read(nas_path: str) -> bytes | None:
+    from app.config import settings as _s
+    if not _s.NAS_USERNAME:
+        return None
+    try:
+        host, share, path = _parse_nas_path(nas_path)
+        conn = _smb_connect()
+        buf = io.BytesIO()
+        conn.retrieveFile(share, path, buf)
+        conn.close()
+        return buf.getvalue()
+    except Exception:
+        return None
 
 
 def _safe_filename(value: str) -> str:
@@ -477,13 +552,11 @@ def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
     ] + [""]
 
     try:
-        local_path = _nas_to_local(config.excel_file_path)
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if local_path.exists():
-            wb = load_workbook(io.BytesIO(local_path.read_bytes()))
+        # NASから既存ファイルを読み込む（処理済列を保持するため）
+        existing = _smb_read(config.excel_file_path)
+        if existing:
+            wb = load_workbook(io.BytesIO(existing))
             ws = wb.active
-            # 既存ファイルに「処理済」列がなければ追加
             existing_headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
             if "処理済" not in existing_headers:
                 col = ws.max_column + 1
@@ -498,32 +571,25 @@ def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
         ws.append(row_values)
         buf = io.BytesIO()
         wb.save(buf)
-        local_path.write_bytes(buf.getvalue())
 
-        logger.info(f"Excel 書き込み完了: {local_path}")
-
-        # エクセルと同じディレクトリにトリガーファイルを書く（PAD連携用）
-        # robocopyがエクセルと一緒にNASへ同期する
-        _write_pad_trigger(local_path.parent)
-
-        return True
+        ok = _smb_write(config.excel_file_path, buf.getvalue())
+        if ok:
+            _write_pad_trigger(config.excel_file_path)
+        return ok
     except Exception as e:
         logger.error(f"Excel 書き込みエラー: {e}")
         return False
 
 
-def _write_pad_trigger(directory: Path) -> None:
-    """PAD連携用トリガーファイルをエクセルと同じディレクトリに書く"""
+def _write_pad_trigger(excel_nas_path: str) -> None:
+    """PAD連携用トリガーファイルをNASのエクセルと同じディレクトリに書く"""
     import datetime
-    trigger_path = directory / "_pad_trigger.txt"
-    try:
-        trigger_path.write_text(
-            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            encoding="utf-8",
-        )
-        logger.info(f"PADトリガー書き込み: {trigger_path}")
-    except Exception as e:
-        logger.warning(f"PADトリガー書き込み失敗: {e}")
+    sep = "\\" if "\\" in excel_nas_path else "/"
+    dir_path = excel_nas_path.rsplit(sep, 1)[0]
+    trigger_path = dir_path + sep + "_pad_trigger.txt"
+    data = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S").encode("utf-8")
+    _smb_write(trigger_path, data)
+    logger.info(f"PADトリガー書き込み: {trigger_path}")
 
 
 def save_maps_to_nas(map_file_paths: list[tuple[str, str]], data: dict, config: models.MakerExtractionConfig) -> bool:
@@ -566,12 +632,14 @@ def save_maps_to_nas(map_file_paths: list[tuple[str, str]], data: dict, config: 
         return False
 
     try:
-        local_dir = _nas_to_local(config.map_save_path)
-        local_dir.mkdir(parents=True, exist_ok=True)
-        dest = local_dir / save_name
-        images[0].save(str(dest), "PDF", resolution=150, save_all=True, append_images=images[1:])
-        logger.info(f"地図PDF保存完了: {dest} ({len(images)}ページ)")
-        return True
+        buf = io.BytesIO()
+        images[0].save(buf, "PDF", resolution=150, save_all=True, append_images=images[1:])
+        sep = "\\" if "\\" in config.map_save_path else "/"
+        dest_path = config.map_save_path.rstrip(sep) + sep + save_name
+        ok = _smb_write(dest_path, buf.getvalue())
+        if ok:
+            logger.info(f"地図PDF保存完了: {dest_path} ({len(images)}ページ)")
+        return ok
     except Exception as e:
         logger.error(f"地図PDF保存エラー: {e}")
         return False
