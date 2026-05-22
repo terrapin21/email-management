@@ -429,10 +429,15 @@ def _write_pad_trigger(directory: Path) -> None:
         logger.warning(f"PADトリガー書き込み失敗: {e}")
 
 
-def save_map_to_nas(file_path: str, filename: str, data: dict, config: models.MakerExtractionConfig) -> bool:
+def save_maps_to_nas(map_file_paths: list[tuple[str, str]], data: dict, config: models.MakerExtractionConfig) -> bool:
+    """複数の地図画像を1つのPDFにまとめてNASに保存する（1枚でもPDF化）"""
     if not config.map_save_path:
         logger.warning("地図保存パスが未設定")
         return False
+    if not map_file_paths:
+        return False
+
+    from PIL import Image as PilImage
 
     date_field = config.map_date_field or "回収日"
     code_val = None
@@ -443,21 +448,41 @@ def save_map_to_nas(file_path: str, filename: str, data: dict, config: models.Ma
                 break
     code = code_val or data.get("コード") or "unknown"
     date_val = data.get(date_field) or "unknown"
+    save_name = f"{_safe_filename(code)}_{_safe_filename(date_val)}_案内図.pdf"
 
-    ext = Path(filename).suffix.lower()
-    save_name = f"{_safe_filename(code)}_{_safe_filename(date_val)}{ext}"
+    IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".tif", ".webp"}
+    images = []
+    for fpath, fname in map_file_paths:
+        ext = Path(fname).suffix.lower()
+        if ext not in IMAGE_EXTS:
+            logger.info(f"地図ファイルをスキップ（非画像）: {fname}")
+            continue
+        try:
+            img = PilImage.open(fpath).convert("RGB")
+            images.append(img)
+            logger.info(f"地図画像を追加: {fname}")
+        except Exception as e:
+            logger.warning(f"地図画像読み込みエラー ({fname}): {e}")
+
+    if not images:
+        logger.warning("有効な地図画像が見つかりませんでした")
+        return False
 
     try:
         local_dir = _nas_to_local(config.map_save_path)
         local_dir.mkdir(parents=True, exist_ok=True)
         dest = local_dir / save_name
-        import shutil
-        shutil.copy2(file_path, dest)
-        logger.info(f"地図保存完了: {dest}")
+        images[0].save(str(dest), "PDF", resolution=150, save_all=True, append_images=images[1:])
+        logger.info(f"地図PDF保存完了: {dest} ({len(images)}ページ)")
         return True
     except Exception as e:
-        logger.error(f"地図保存エラー: {e}")
+        logger.error(f"地図PDF保存エラー: {e}")
         return False
+
+
+def save_map_to_nas(file_path: str, filename: str, data: dict, config: models.MakerExtractionConfig) -> bool:
+    """後方互換用。単一ファイルをsave_maps_to_nasに委譲する"""
+    return save_maps_to_nas([(file_path, filename)], data, config)
 
 
 # ── メイン処理 ────────────────────────────────────────────────────────────────
@@ -678,9 +703,8 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
             status = "needs_review"
             review_reason = "Excel への書き込みに失敗しました（NAS接続を確認してください）"
 
-        if excel_written:
-            for map_path, map_name in map_file_paths:
-                save_map_to_nas(map_path, map_name, extracted_data, config)
+        if excel_written and map_file_paths:
+            save_maps_to_nas(map_file_paths, extracted_data, config)
 
     # 結果を保存
     result = models.ExtractionResult(
