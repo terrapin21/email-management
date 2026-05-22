@@ -40,6 +40,8 @@ def _resolve_att_path(att) -> str | None:
 
 MAP_KEYWORDS = ["地図", "案内図", "付近地図", "map", "邸案内図", "周辺図", "ちず", "annai"]
 REQUEST_KEYWORDS = ["回収依頼", "養生回収", "養生材回収", "依頼票", "依頼書", "床養生", "リユース"]
+_SITE_ID_KEYWORDS = ["コード", "施主", "工事番号", "現場コード", "現場no", "発注no", "案件no", "物件コード",
+                     "site id", "site no", "site code", "genba no"]
 
 _ai_client: Optional[anthropic.Anthropic] = None
 
@@ -259,6 +261,64 @@ def analyze_file_with_confidence(file_path: str, filename: str, config: models.M
 LOCAL_OUTPUT_BASE = Path("/app/nas_output")
 
 
+def _is_site_id_field(field_name: str) -> bool:
+    n = field_name.lower()
+    return any(k in n for k in _SITE_ID_KEYWORDS)
+
+
+def _find_map_from_related_emails(
+    email: models.Email,
+    extracted_data: dict,
+    config: models.MakerExtractionConfig,
+    db: Session,
+) -> list[tuple[str, str]]:
+    """同じコード値を持つ関連メールの添付ファイルから地図ファイルを探す"""
+    # 抽出データのコード系フィールド値を収集
+    code_values = []
+    for field in config.fields:
+        if field.field_type == "code":
+            val = extracted_data.get(field.field_name)
+            if val:
+                code_values.append(str(val))
+
+    # コード系フィールドが設定されていない場合はEmailFieldからも探す
+    if not code_values:
+        for ef in (email.extracted_fields or []):
+            if _is_site_id_field(ef.field_name) and ef.field_value:
+                code_values.append(ef.field_value)
+
+    if not code_values:
+        return []
+
+    # 同じコード値を持つ他のメールを取得
+    related_fields = db.query(models.EmailField).filter(
+        models.EmailField.field_value.in_(code_values),
+        models.EmailField.email_id != email.id,
+    ).all()
+
+    if not related_fields:
+        return []
+
+    related_email_ids = list({rf.email_id for rf in related_fields})
+
+    # 関連メールの添付ファイルから地図ファイル（画像）を探す
+    IMAGE_EXTS = {".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp", ".webp"}
+    map_files = []
+    for rel_email_id in related_email_ids:
+        rel_email = db.query(models.Email).get(rel_email_id)
+        if not rel_email:
+            continue
+        for att in (rel_email.attachments or []):
+            ext = Path(att.filename).suffix.lower()
+            if is_map_file(att.filename) or ext in IMAGE_EXTS:
+                fpath = _resolve_att_path(att)
+                if fpath:
+                    map_files.append((fpath, att.filename))
+                    logger.info(f"関連メール(id={rel_email_id})から地図ファイル取得: {att.filename}")
+
+    return map_files
+
+
 def _nas_to_local(nas_path: str) -> Path:
     """NASパス(UNCパス)をDockerローカルパスに変換する"""
     # バックスラッシュをスラッシュに統一
@@ -283,8 +343,8 @@ def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
         return False
 
     sorted_fields = sorted(config.fields, key=lambda f: f.order)
-    headers = [f.field_name for f in sorted_fields]
-    row_values = [str(data.get(f.field_name) or "") for f in sorted_fields]
+    headers = [f.field_name for f in sorted_fields] + ["処理済"]
+    row_values = [str(data.get(f.field_name) or "") for f in sorted_fields] + [""]
 
     try:
         local_path = _nas_to_local(config.excel_file_path)
@@ -293,6 +353,13 @@ def write_excel_row(data: dict, config: models.MakerExtractionConfig) -> bool:
         if local_path.exists():
             wb = load_workbook(io.BytesIO(local_path.read_bytes()))
             ws = wb.active
+            # 既存ファイルに「処理済」列がなければ追加
+            existing_headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+            if "処理済" not in existing_headers:
+                col = ws.max_column + 1
+                ws.cell(1, col).value = "処理済"
+                for row in range(2, ws.max_row + 1):
+                    ws.cell(row, col).value = ""
         else:
             wb = Workbook()
             ws = wb.active
@@ -456,6 +523,10 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
             if map_path:
                 map_file_paths.append((map_path, map_att.filename))
 
+        # 地図が見つからない場合は関連メールから探す
+        if not map_file_paths:
+            map_file_paths = _find_map_from_related_emails(email, extracted_data, config, db)
+
     else:
         # パターン2: メール本文から抽出
         attachment_pattern = "pattern2"
@@ -482,6 +553,10 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
                 review_reason = f"本文解析エラー: {e}"
         else:
             review_reason = "メール本文が空です"
+
+        # 本文抽出パターンでも関連メールから地図を探す
+        if not map_file_paths and extracted_data:
+            map_file_paths = _find_map_from_related_emails(email, extracted_data, config, db)
 
     # 地図必須チェック
     if config.map_required and not map_file_paths and status == "completed":
