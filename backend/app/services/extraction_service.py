@@ -141,6 +141,11 @@ def _field_label(f: models.ExtractionField) -> str:
 
 
 def _build_extraction_prompt(config: models.MakerExtractionConfig) -> str:
+    import datetime as _dt
+    today = _dt.date.today()
+    current_year = today.year
+    next_year = today.year + 1
+
     required = [f for f in config.fields if f.required]
     optional = [f for f in config.fields if not f.required]
     fields_desc = "必須: " + ", ".join(_field_label(f) for f in required)
@@ -156,6 +161,7 @@ def _build_extraction_prompt(config: models.MakerExtractionConfig) -> str:
 書類の内容を解析して、抽出項目の値をJSONのみで返してください。
 別の呼び方が記載されていても同じ項目として扱い、JSONのキーは必ず左側の名前を使用してください。
 見つからない場合は null を使用。日付は YYYY-MM-DD 形式。
+【日付の年について】今日は {today.strftime('%Y年%m月%d日')} です。書類に年の記載がない場合（例: 6月2日）は {current_year}年 を補完してください。ただし {current_year}年 で補完した日付が今日より過去になる場合は {next_year}年 を使用してください。
 【重要】日付フィールドに具体的な日付がなく、「最短」「最速」「最短日」「できるだけ早く」などの表現がある場合は、そのフィールドの値を「最短」と設定してください。
 例: {example}
 JSON以外は絶対に出力しないでください。"""
@@ -278,6 +284,67 @@ def analyze_file_with_confidence(file_path: str, filename: str, config: models.M
 # ── ローカルファイル操作（NASはWindowsからrobocopyで同期） ────────────────────
 
 LOCAL_OUTPUT_BASE = Path("/app/nas_output")
+
+
+def _normalize_date_value(value: str) -> tuple[str, bool]:
+    """
+    抽出された日付文字列を正規化する。
+    Returns: (正規化後の文字列, 今日以降かどうか)
+    - 年なし（M月D日, M/D 等）→ 今年で試し、過去なら来年
+    - 年あり → そのまま検証（過去ならFalse）
+    """
+    import datetime as _dt
+    today = _dt.date.today()
+
+    s = str(value).strip()
+    month = day = year = None
+
+    def _try_date(y: int, mo: int, d: int) -> "_dt.date | None":
+        try:
+            return _dt.date(y, mo, d)
+        except Exception:
+            return None
+
+    # YYYY-MM-DD / YYYY/MM/DD
+    m = re.match(r'^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})$', s)
+    if m:
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+    if year is None:
+        # YYYY年M月D日
+        m = re.match(r'^(\d{4})年(\d{1,2})月(\d{1,2})日', s)
+        if m:
+            year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+    if year is None:
+        # M月D日（年なし）
+        m = re.match(r'^(\d{1,2})月(\d{1,2})日', s)
+        if m:
+            month, day = int(m.group(1)), int(m.group(2))
+
+    if month is None:
+        # M/D or M-D（年なし）
+        m = re.match(r'^(\d{1,2})[/\-](\d{1,2})$', s)
+        if m:
+            month, day = int(m.group(1)), int(m.group(2))
+
+    if month is None:
+        # 解析不能：そのまま返す（バリデーションしない）
+        return s, True
+
+    if year is not None:
+        # 年あり: そのまま検証
+        d = _try_date(year, month, day)
+        if d:
+            return d.strftime('%Y-%m-%d'), d >= today
+        return s, False
+    else:
+        # 年なし: 今年→来年の順で試す
+        for y in (today.year, today.year + 1):
+            d = _try_date(y, month, day)
+            if d and d >= today:
+                return d.strftime('%Y-%m-%d'), True
+        return s, False
 
 
 def _has_soonest_keyword(text: str) -> bool:
@@ -686,6 +753,19 @@ def process_email_extraction(email_id: int, db: Session) -> dict:
     if config.map_required and not map_file_paths and status == "completed":
         status = "needs_review"
         review_reason = "地図ファイルが見つかりませんでした（必須設定）"
+
+    # 日付フィールドの正規化・過去日付チェック
+    for field in config.fields:
+        if field.field_type != "date":
+            continue
+        val = extracted_data.get(field.field_name)
+        if not val or _has_soonest_keyword(str(val)):
+            continue
+        normalized, is_future = _normalize_date_value(str(val))
+        extracted_data[field.field_name] = normalized
+        if not is_future:
+            status = "needs_review"
+            review_reason = f"{field.field_name} が過去の日付（{normalized}）のため要確認です"
 
     # 最短キーワードチェック：本文・抽出値・日付フィールドに「最短」があれば手動入力待ち
     needs_soonest_date = False
