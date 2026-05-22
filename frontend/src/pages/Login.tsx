@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { login } from '../api/client'
 import { useAuth } from '../context/AuthContext'
@@ -70,10 +70,6 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-500 mt-4">
-          アカウントをお持ちでない方は{' '}
-          <Link to="/register" className="text-indigo-600 hover:underline">新規登録</Link>
-        </p>
       </div>
     </div>
   )

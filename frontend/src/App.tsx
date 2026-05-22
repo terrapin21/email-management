@@ -2,7 +2,6 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import Sidebar from './components/Sidebar'
 import Login from './pages/Login'
-import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import EmailList from './pages/EmailList'
 import EmailDetail from './pages/EmailDetail'
@@ -45,7 +44,6 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
       <Route path="/*" element={<ProtectedLayout />} />
     </Routes>
   )

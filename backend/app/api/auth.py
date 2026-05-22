@@ -3,14 +3,14 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models
-from app.auth import verify_password, create_access_token, get_current_user, hash_password
+from app.auth import verify_password, create_access_token, get_current_user, hash_password, require_admin
 from app.schemas import Token, UserOut, RegisterRequest
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserOut)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+def register(payload: RegisterRequest, db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
     if db.query(models.User).filter(models.User.username == payload.username).first():
         raise HTTPException(status_code=400, detail="このユーザー名は既に使われています")
     if db.query(models.User).filter(models.User.email == payload.email).first():
