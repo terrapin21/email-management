@@ -443,16 +443,20 @@ def save_map_to_nas(file_path: str, filename: str, data: dict, config: models.Ma
 def process_email_extraction(email_id: int, db: Session) -> dict:
     email = db.query(models.Email).filter(models.Email.id == email_id).first()
     if not email:
+        logger.warning(f"抽出スキップ: email_id={email_id} メールが見つかりません")
         return {"success": False, "reason": "メールが見つかりません"}
 
     maker = email.ai_manufacturer
+    logger.info(f"抽出開始: email_id={email_id}, ai_manufacturer={maker!r}")
     if not maker:
+        logger.warning(f"抽出スキップ: email_id={email_id} ai_manufacturerが未設定")
         return {"success": False, "reason": "メーカー情報が未解析です"}
 
     config = db.query(models.MakerExtractionConfig).filter(
         models.MakerExtractionConfig.maker_name.ilike(f"%{maker}%")
     ).first()
     if not config:
+        logger.warning(f"抽出スキップ: email_id={email_id} メーカー「{maker}」の設定なし")
         return {"success": False, "reason": f"メーカー「{maker}」の抽出設定がありません"}
 
     # 既存結果を削除して再処理

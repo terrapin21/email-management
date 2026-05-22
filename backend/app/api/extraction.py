@@ -131,11 +131,17 @@ def process_extraction(
 
 
 def _run_extraction(email_id: int):
+    import logging
     from app.database import SessionLocal
     from app.services.extraction_service import process_email_extraction
+    _logger = logging.getLogger(__name__)
     db = SessionLocal()
     try:
-        process_email_extraction(email_id, db)
+        result = process_email_extraction(email_id, db)
+        _logger.info(f"手動抽出完了: email_id={email_id}, result={result}")
+    except Exception as e:
+        _logger.error(f"手動抽出エラー: email_id={email_id}, error={e}", exc_info=True)
+        db.rollback()
     finally:
         db.close()
 
