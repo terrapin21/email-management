@@ -110,6 +110,7 @@ export interface EmailListItem {
   has_attachments: boolean
   registration_status?: 'registered' | 'not_registered' | null
   reflection_status?: 'reflected' | 'not_reflected' | null
+  needs_soonest_date: boolean
 }
 
 export interface EmailDetail {
