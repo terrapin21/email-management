@@ -160,7 +160,7 @@ def _build_extraction_prompt(config: models.MakerExtractionConfig) -> str:
 
 書類の内容を解析して、抽出項目の値をJSONのみで返してください。
 別の呼び方が記載されていても同じ項目として扱い、JSONのキーは必ず左側の名前を使用してください。
-見つからない場合は null を使用。日付は YYYY-MM-DD 形式。
+見つからない場合は null を使用。日付は YYYY-M-D 形式（例: 2026-1-5）。ゼロ埋めは不要。
 【日付の年について】今日は {today.strftime('%Y年%m月%d日')} です。書類に年の記載がない場合（例: 6月2日）は {current_year}年 を補完してください。ただし {current_year}年 で補完した日付が今日より過去になる場合は {next_year}年 を使用してください。
 【重要】日付フィールドに具体的な日付がなく、「最短」「最速」「最短日」「できるだけ早く」などの表現がある場合は、そのフィールドの値を「最短」と設定してください。
 例: {example}
@@ -336,14 +336,14 @@ def _normalize_date_value(value: str) -> tuple[str, bool]:
         # 年あり: そのまま検証
         d = _try_date(year, month, day)
         if d:
-            return d.strftime('%Y-%m-%d'), d >= today
+            return f"{d.year}-{d.month}-{d.day}", d >= today
         return s, False
     else:
         # 年なし: 今年→来年の順で試す
         for y in (today.year, today.year + 1):
             d = _try_date(y, month, day)
             if d and d >= today:
-                return d.strftime('%Y-%m-%d'), True
+                return f"{d.year}-{d.month}-{d.day}", True
         return s, False
 
 
