@@ -132,6 +132,7 @@ def list_emails(
             is_forwarded=e.id in forwarded_ids,
             has_attachments=e.id in has_attachment_ids,
             needs_soonest_date=e.id in soonest_ids,
+            pickup_note=(e.ai_key_info or {}).get("pickup_note"),
             id=e.id,
             account_id=e.account_id,
             subject=e.subject,

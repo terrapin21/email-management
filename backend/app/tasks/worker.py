@@ -20,6 +20,16 @@ _SITE_ID_KEYWORDS = [
     "site id", "site no", "site code", "genba no",
 ]
 
+_PICKUP_KEYWORDS = [
+    "取りに来て", "取りに来い", "引き取りに", "引取りに", "お引き取り",
+    "事務所にある", "事務所に保管", "事務所までお越し",
+    "倉庫にある", "倉庫に保管", "弊社にある", "弊社倉庫",
+    "持ち込み", "持込み", "指定場所", "別途ご連絡",
+]
+
+def _detect_pickup_note(body_text: str) -> bool:
+    return any(kw in body_text for kw in _PICKUP_KEYWORDS)
+
 def _is_site_id_field(name: str) -> bool:
     n = name.lower()
     return any(k in n for k in _SITE_ID_KEYWORDS)
@@ -167,7 +177,10 @@ def _run_ai_analysis(db: Session, email_obj: models.Email):
         email_obj.ai_category = result.get("category")
         email_obj.ai_manufacturer = result.get("manufacturer")
         email_obj.ai_priority = result.get("priority")
-        email_obj.ai_key_info = result.get("key_info", {})
+        key_info = dict(result.get("key_info") or {})
+        if _detect_pickup_note(email_obj.body_text or ""):
+            key_info["pickup_note"] = "指定場所回収"
+        email_obj.ai_key_info = key_info
 
         # 既存の抽出フィールドを削除して再保存
         db.query(models.EmailField).filter(models.EmailField.email_id == email_obj.id).delete()

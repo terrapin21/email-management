@@ -111,6 +111,7 @@ export interface EmailListItem {
   registration_status?: 'registered' | 'not_registered' | null
   reflection_status?: 'reflected' | 'not_reflected' | null
   needs_soonest_date: boolean
+  pickup_note?: string
 }
 
 export interface EmailDetail {

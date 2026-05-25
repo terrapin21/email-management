@@ -526,9 +526,16 @@ export default function EmailDetailPage() {
                   {email.ai_summary}
                 </div>
               )}
-              {email.ai_key_info && Object.keys(email.ai_key_info).length > 0 && (
+              {email.ai_key_info?.pickup_note && (
+                <div className="mt-2">
+                  <span className="inline-flex items-center gap-1 text-sm font-bold bg-purple-100 text-purple-700 rounded-full px-3 py-1">
+                    📍 指定場所回収
+                  </span>
+                </div>
+              )}
+              {email.ai_key_info && Object.keys(email.ai_key_info).filter(k => k !== 'pickup_note').length > 0 && (
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  {Object.entries(email.ai_key_info).filter(([, v]) => v).map(([k, v]) => (
+                  {Object.entries(email.ai_key_info).filter(([k, v]) => k !== 'pickup_note' && v).map(([k, v]) => (
                     <div key={k} className="text-xs">
                       <span className="text-indigo-400">{k}: </span>
                       <span className="text-indigo-800">{v as string}</span>

@@ -308,6 +308,7 @@ class EmailListItem(BaseModel):
     registration_status: Optional[str] = None   # "registered" | "not_registered" | None
     reflection_status: Optional[str] = None     # "reflected" | "not_reflected" | None
     needs_soonest_date: bool = False
+    pickup_note: Optional[str] = None
 
     class Config:
         from_attributes = True
