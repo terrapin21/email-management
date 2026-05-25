@@ -38,7 +38,8 @@ def _resolve_att_path(att) -> str | None:
         return str(cache)
     return None
 
-MAP_KEYWORDS = ["地図", "案内図", "付近地図", "map", "邸案内図", "周辺図", "ちず", "annai"]
+MAP_KEYWORDS = ["地図", "案内図", "付近地図", "map", "邸案内図", "周辺図", "ちず", "annai",
+                "見取図", "見取り図", "付近見取図", "付近見取り図", "現地案内図", "位置図"]
 REQUEST_KEYWORDS = ["回収依頼", "養生回収", "養生材回収", "依頼票", "依頼書", "床養生", "リユース"]
 _SITE_ID_KEYWORDS = ["コード", "施主", "工事番号", "現場コード", "現場no", "発注no", "案件no", "物件コード",
                      "site id", "site no", "site code", "genba no"]
