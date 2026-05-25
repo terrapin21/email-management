@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 # 添付ファイルのローカルキャッシュ先（コンテナの永続 volume）
 _ATT_CACHE = Path("/app/attachments/cache")
-from sqlalchemy import desc, or_, exists
+from sqlalchemy import desc, or_, exists, cast, Text
 from typing import Optional, List
 from datetime import datetime, timezone
 from app.database import get_db
@@ -41,6 +41,10 @@ def _apply_search(q, search: str):
         exists().where(
             models.EmailAttachment.email_id == models.Email.id,
             models.EmailAttachment.filename.ilike(kw),
+        ),
+        exists().where(
+            models.ExtractionResult.email_id == models.Email.id,
+            cast(models.ExtractionResult.extracted_data, Text).ilike(kw),
         ),
     ))
 
