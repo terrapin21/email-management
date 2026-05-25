@@ -594,7 +594,7 @@ def _write_pad_trigger(excel_nas_path: str) -> None:
 
 
 def save_maps_to_nas(map_file_paths: list[tuple[str, str]], data: dict, config: models.MakerExtractionConfig) -> bool:
-    """複数の地図画像を1つのPDFにまとめてNASに保存する（1枚でもPDF化）"""
+    """地図ファイル（画像またはPDF）をNASに保存する。画像は1つのPDFに結合、PDFはそのまま保存。"""
     if not config.map_save_path:
         logger.warning("地図保存パスが未設定")
         return False
@@ -614,32 +614,47 @@ def save_maps_to_nas(map_file_paths: list[tuple[str, str]], data: dict, config: 
     date_val = data.get(date_field) or "unknown"
     save_name = f"{_safe_filename(code)}_{_safe_filename(date_val)}_案内図.pdf"
 
+    sep = "\\" if "\\" in config.map_save_path else "/"
+    dest_path = config.map_save_path.rstrip(sep) + sep + save_name
+
     IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".tif", ".webp"}
     images = []
+    first_pdf: bytes | None = None
+
     for fpath, fname in map_file_paths:
         ext = Path(fname).suffix.lower()
-        if ext not in IMAGE_EXTS:
-            logger.info(f"地図ファイルをスキップ（非画像）: {fname}")
-            continue
-        try:
-            img = PilImage.open(fpath).convert("RGB")
-            images.append(img)
-            logger.info(f"地図画像を追加: {fname}")
-        except Exception as e:
-            logger.warning(f"地図画像読み込みエラー ({fname}): {e}")
-
-    if not images:
-        logger.warning("有効な地図画像が見つかりませんでした")
-        return False
+        if ext == ".pdf":
+            if first_pdf is None:
+                try:
+                    with open(fpath, "rb") as f:
+                        first_pdf = f.read()
+                    logger.info(f"地図PDFを読み込み: {fname}")
+                except Exception as e:
+                    logger.warning(f"地図PDF読み込みエラー ({fname}): {e}")
+        elif ext in IMAGE_EXTS:
+            try:
+                img = PilImage.open(fpath).convert("RGB")
+                images.append(img)
+                logger.info(f"地図画像を追加: {fname}")
+            except Exception as e:
+                logger.warning(f"地図画像読み込みエラー ({fname}): {e}")
+        else:
+            logger.info(f"地図ファイルをスキップ（非対応形式）: {fname}")
 
     try:
-        buf = io.BytesIO()
-        images[0].save(buf, "PDF", resolution=150, save_all=True, append_images=images[1:])
-        sep = "\\" if "\\" in config.map_save_path else "/"
-        dest_path = config.map_save_path.rstrip(sep) + sep + save_name
-        ok = _smb_write(dest_path, buf.getvalue())
+        if images:
+            buf = io.BytesIO()
+            images[0].save(buf, "PDF", resolution=150, save_all=True, append_images=images[1:])
+            pdf_bytes = buf.getvalue()
+        elif first_pdf:
+            pdf_bytes = first_pdf
+        else:
+            logger.warning("有効な地図ファイルが見つかりませんでした")
+            return False
+
+        ok = _smb_write(dest_path, pdf_bytes)
         if ok:
-            logger.info(f"地図PDF保存完了: {dest_path} ({len(images)}ページ)")
+            logger.info(f"地図PDF保存完了: {dest_path}")
         return ok
     except Exception as e:
         logger.error(f"地図PDF保存エラー: {e}")
