@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 RAW_STORAGE = Path("/app/attachments/raw")
 EXTRACTED_STORAGE = Path("/app/attachments/extracted")
 _ATT_CACHE = Path("/app/attachments/cache")
-SAME_SENDER_WINDOW_HOURS = 48
+TIGHT_WINDOW_BEFORE_MINUTES = 5   # clock skew allowance
+TIGHT_WINDOW_AFTER_HOURS = 2      # password usually arrives within 1h
+FALLBACK_WINDOW_HOURS = 24        # wider search when tight window misses
 
 
 def is_archive(filename: str) -> bool:
@@ -120,6 +122,51 @@ def _extract_password_with_ai(text: str) -> Optional[str]:
         return None
 
 
+def _normalize_subject(subject: str) -> str:
+    """Re:, Fw:, [パスワード] 等のプレフィックスを除去して正規化する。"""
+    s = (subject or '').strip()
+    prefixes = [
+        r'^Re\s*:\s*', r'^RE\s*:\s*', r'^Fw\s*:\s*', r'^FW\s*:\s*',
+        r'^Fwd\s*:\s*', r'^FWD\s*:\s*', r'^\[パスワード[^\]]*\]\s*',
+        r'^\[password[^\]]*\]\s*', r'^\[PASS[^\]]*\]\s*', r'^\[PW[^\]]*\]\s*',
+    ]
+    changed = True
+    while changed:
+        changed = False
+        for p in prefixes:
+            new_s = re.sub(p, '', s, flags=re.IGNORECASE)
+            if new_s != s:
+                s = new_s.strip()
+                changed = True
+    return s
+
+
+def _subject_similarity(subj_a: str, subj_b: str) -> float:
+    """件名の類似度を 0〜1 で返す（トークン重複率）。"""
+    a = _normalize_subject(subj_a)
+    b = _normalize_subject(subj_b)
+    if not a or not b:
+        return 0.0
+    tokens_a = set(re.findall(r'[^\s　【】「」（）\[\]]+', a))
+    tokens_b = set(re.findall(r'[^\s　【】「」（）\[\]]+', b))
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / max(len(tokens_a), len(tokens_b))
+
+
+def _query_password_candidates(
+    db: Session, archive_email: models.Email,
+    window_start: datetime, window_end: datetime,
+) -> list:
+    candidates = db.query(models.Email).filter(
+        models.Email.from_address == archive_email.from_address,
+        models.Email.id != archive_email.id,
+        models.Email.received_at >= window_start,
+        models.Email.received_at <= window_end,
+    ).all()
+    return [e for e in candidates if e.subject and is_password_email(e.subject)]
+
+
 def find_password_email(db: Session, archive_email: models.Email) -> Optional[models.Email]:
     if not archive_email.from_address or not archive_email.received_at:
         return None
@@ -128,20 +175,29 @@ def find_password_email(db: Session, archive_email: models.Email) -> Optional[mo
     if received.tzinfo is None:
         received = received.replace(tzinfo=timezone.utc)
 
-    window_start = received - timedelta(hours=SAME_SENDER_WINDOW_HOURS)
-    window_end = received + timedelta(hours=SAME_SENDER_WINDOW_HOURS)
+    # Tight window: password usually arrives within 1 hour after the archive email
+    pw_candidates = _query_password_candidates(
+        db, archive_email,
+        received - timedelta(minutes=TIGHT_WINDOW_BEFORE_MINUTES),
+        received + timedelta(hours=TIGHT_WINDOW_AFTER_HOURS),
+    )
 
-    candidates = db.query(models.Email).filter(
-        models.Email.from_address == archive_email.from_address,
-        models.Email.id != archive_email.id,
-        models.Email.received_at >= window_start,
-        models.Email.received_at <= window_end,
-    ).all()
+    if not pw_candidates:
+        # Fallback: same-day ±24h search
+        pw_candidates = _query_password_candidates(
+            db, archive_email,
+            received - timedelta(hours=FALLBACK_WINDOW_HOURS),
+            received + timedelta(hours=FALLBACK_WINDOW_HOURS),
+        )
 
-    for email in candidates:
-        if email.subject and is_password_email(email.subject):
-            return email
-    return None
+    if not pw_candidates:
+        return None
+    if len(pw_candidates) == 1:
+        return pw_candidates[0]
+
+    # Multiple candidates: pick highest subject similarity
+    archive_subj = archive_email.subject or ''
+    return max(pw_candidates, key=lambda e: _subject_similarity(archive_subj, e.subject or ''))
 
 
 def _extract_zip(data: bytes, password: str, output_dir: Path) -> list:
@@ -397,7 +453,7 @@ def try_extract_pending_archives_for_sender(db: Session, password_email: models.
     received = password_email.received_at
     if received and received.tzinfo is None:
         received = received.replace(tzinfo=timezone.utc)
-    window_start = (received or datetime.now(timezone.utc)) - timedelta(hours=SAME_SENDER_WINDOW_HOURS)
+    window_start = (received or datetime.now(timezone.utc)) - timedelta(hours=FALLBACK_WINDOW_HOURS)
 
     pending = db.query(models.EncryptedArchive).join(
         models.Email, models.EncryptedArchive.email_id == models.Email.id
