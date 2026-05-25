@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 # 添付ファイルのローカルキャッシュ先（コンテナの永続 volume）
 _ATT_CACHE = Path("/app/attachments/cache")
-from sqlalchemy import desc, or_
+from sqlalchemy import desc, or_, exists
 from typing import Optional, List
 from datetime import datetime, timezone
 from app.database import get_db
@@ -21,6 +21,28 @@ from app.tasks.worker import _run_ai_analysis, _run_forwarding
 from app.services.smtp_service import forward_email, build_subject
 
 router = APIRouter(prefix="/api/emails", tags=["emails"])
+
+
+def _apply_search(q, search: str):
+    """全フィールドを対象にキーワード検索フィルターを適用する。"""
+    kw = f"%{search}%"
+    return q.filter(or_(
+        models.Email.subject.ilike(kw),
+        models.Email.from_address.ilike(kw),
+        models.Email.from_name.ilike(kw),
+        models.Email.body_text.ilike(kw),
+        models.Email.ai_summary.ilike(kw),
+        models.Email.ai_category.ilike(kw),
+        models.Email.ai_manufacturer.ilike(kw),
+        exists().where(
+            models.EmailField.email_id == models.Email.id,
+            models.EmailField.field_value.ilike(kw),
+        ),
+        exists().where(
+            models.EmailAttachment.email_id == models.Email.id,
+            models.EmailAttachment.filename.ilike(kw),
+        ),
+    ))
 
 
 @router.get("", response_model=PaginatedEmails)
@@ -50,12 +72,7 @@ def list_emails(
     if priority:
         q = q.filter(models.Email.ai_priority == priority)
     if search:
-        q = q.filter(or_(
-            models.Email.subject.ilike(f"%{search}%"),
-            models.Email.from_address.ilike(f"%{search}%"),
-            models.Email.from_name.ilike(f"%{search}%"),
-            models.Email.ai_summary.ilike(f"%{search}%"),
-        ))
+        q = _apply_search(q, search)
 
     total = q.count()
     emails = q.order_by(desc(models.Email.received_at)).offset((page - 1) * per_page).limit(per_page).all()
@@ -416,12 +433,7 @@ def analyze_all(
     if priority:
         q = q.filter(models.Email.ai_priority == priority)
     if search:
-        q = q.filter(or_(
-            models.Email.subject.ilike(f"%{search}%"),
-            models.Email.from_address.ilike(f"%{search}%"),
-            models.Email.from_name.ilike(f"%{search}%"),
-            models.Email.ai_summary.ilike(f"%{search}%"),
-        ))
+        q = _apply_search(q, search)
 
     emails = q.all()
     ids = [e.id for e in emails]
